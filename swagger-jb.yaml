@@ -5,7 +5,7 @@ info:
   description: |
 servers:
 - url: "http://{host}/v1"
-  description: "GPU 서버 (Runway)"
+  description: ""
   variables:
     host:
       default: "gpu.internal:8000"
