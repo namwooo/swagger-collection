@@ -5,26 +5,29 @@ info:
   description: |
 servers:
 - url: "http://{host}/v1"
+  description: "GPU 서버 (Runway)"
   variables:
     host:
-      default: "mrx.internal:8000"
+      default: "gpu.internal:8000"
 tags:
 - name: "Dataset"
-  description: "Dataset 구성 (#3, #4)"
+  description: "IF-L01 Dataset 구성 지시 · 상태 조회"
 - name: "Training"
-  description: "학습 지시 · 취소 · 조회 (#5 ~ #9)"
+  description: "IF-T01 학습 지시 · IF-T05 취소 · 상태/결과 조회"
 - name: "Callback"
-  description: "MRX → 클라이언트 Callback (#1, #2, #4, #6, #7). 클라이언트가 구현하고 MRX가 호출한다."
- 
+  description: "GPU → CPU Callback (IF-S01, IF-L02, IF-L03, IF-T02, IF-T03). CPU가 구현하고 GPU가 호출한다."
+
 paths:
   # ------------------------------------------------------------------ Dataset
   /datasets:
     post:
       tags: ["Dataset"]
-      summary: "#3 Dataset 구성 지시"
+      summary: "IF-L01 Dataset 구성 지시"
       description: |
-        라벨 결과를 모아 학습용 데이터셋을 구성하는 작업을 등록한다.
-        끝나면 `POST /callbacks/dataset-completed`(#4)를 호출한다.
+        검수가 끝난 라벨 목록으로 Dataset 구성을 지시한다.
+        끝나면 GPU가 `POST /callbacks/dataset-completed`(IF-L03)를 호출한다.
+
+        화면: SCR-01 상세 Dataset, SCR-02 판정 기준, SCR-12 검수 결과
       operationId: "createDataset"
       requestBody:
         required: true
@@ -34,45 +37,57 @@ paths:
               $ref: "#/components/schemas/DatasetCreate"
       responses:
         "202":
-          description: "접수됨. 상태는 `queued`."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Dataset"
+          $ref: "#/components/responses/DatasetAccepted"
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
-          description: "지정한 이미지나 기반 데이터셋이 없음"
+          description: "`base_dataset_id`에 해당하는 Dataset이 없음"
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+              example:
+                type: "https://gpu.internal/problems/not-found"
+                title: "not-found"
+                status: 404
+                detail: "base_dataset_id 'DS-20261023-002' not found"
+                instance: "/v1/datasets"
+        "409":
+          $ref: "#/components/responses/IdConflict"
   /datasets/{dataset_id}:
     get:
       tags: ["Dataset"]
-      summary: "Dataset 상태 조회 (#4 미수신 시)"
-      description: "Dataset 구성 완료 Callback(#4)을 받지 못했을 때 상태를 확인한다."
+      summary: "Dataset 상태 조회 (IF-L03 미수신 시)"
+      description: |
+        IF-L03을 받지 못했을 때 상태를 확인한다.
+        응답 항목은 IF-L03과 같고, 아직 구성 중이면 `result`가 `RUNNING`이다.
       operationId: "getDataset"
       parameters:
       - $ref: "#/components/parameters/dataset_id"
       responses:
         "200":
-          description: "데이터셋"
+          description: "Dataset 상태"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Dataset"
+                $ref: "#/components/schemas/DatasetStatus"
         "404":
           $ref: "#/components/responses/NotFound"
- 
+
   # ------------------------------------------------------------------ Training
   /trainings:
     post:
       tags: ["Training"]
-      summary: "#5 Train 작업 지시"
+      summary: "IF-T01 Train 작업 지시"
       description: |
-        데이터셋으로 학습 작업을 등록한다. 학습이 끝나면 평가까지 이어서 수행하고,
-        진행 중에는 `POST /callbacks/training-progress`(#6), 끝나면 `POST /callbacks/training-completed`(#7)를 호출한다.
+        Dataset으로 학습을 지시한다. 학습이 끝나면 평가까지 이어서 수행하고,
+        지정받은 `model_id` · `model_version`으로 Registry에 등록한다.
+
+        - 진행 중: `POST /callbacks/training-progress`(IF-T02)
+        - 성공: `POST /callbacks/training-completed`(IF-T03)
+        - 실패: IF-T02를 `status: FAILED`로 보낸다
+
+        화면: SCR-01, SCR-06 모델
       operationId: "createTraining"
       requestBody:
         required: true
@@ -82,109 +97,143 @@ paths:
               $ref: "#/components/schemas/TrainingCreate"
       responses:
         "202":
-          description: "접수됨. 상태는 `queued`."
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Training"
+          $ref: "#/components/responses/TrainingAccepted"
         "400":
           $ref: "#/components/responses/BadRequest"
         "404":
-          description: "지정한 데이터셋이나 모델이 없음"
+          description: "`dataset_id` 또는 기준 모델(`base_model_id` · `base_model_version`)이 없음"
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
+              example:
+                type: "https://gpu.internal/problems/not-found"
+                title: "not-found"
+                status: 404
+                detail: "dataset 'DS-20261030-001' not found"
+                instance: "/v1/trainings"
         "409":
-          description: "데이터셋 구성이 끝나지 않았거나, 요청한 GPU를 할당할 수 없음"
+          description: "같은 `run_id`로 다른 내용이 이미 접수됐거나, Dataset 구성이 끝나지 않음"
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-  /trainings/{training_id}:
+              example:
+                type: "https://gpu.internal/problems/conflict"
+                title: "conflict"
+                status: 409
+                detail: "dataset 'DS-20261030-001' is not DONE"
+                instance: "/v1/trainings"
+  /trainings/{run_id}:
     get:
       tags: ["Training"]
-      summary: "#9 작업 상태 조회 (BT-03)"
+      summary: "학습 상태 조회 (BT-03)"
       description: |
-        학습 · 평가 작업의 현재 상태와 진행률을 조회한다.
-        학습 진행 상태 Callback(#6)이 3분 동안 오지 않으면 이 API로 확인한다 (BT-03).
+        학습 실행의 현재 상태를 조회한다. 응답 항목은 마지막으로 보낸 IF-T02와 같다.
+        IF-T02가 3분 동안 오지 않으면 이 API로 확인한다 (BT-03).
       operationId: "getTraining"
       parameters:
-      - $ref: "#/components/parameters/training_id"
+      - $ref: "#/components/parameters/run_id"
       responses:
         "200":
-          description: "학습 작업"
+          description: "학습 상태"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Training"
+                $ref: "#/components/schemas/TrainingStatus"
         "404":
           $ref: "#/components/responses/NotFound"
-  /trainings/{training_id}/result:
+  /trainings/{run_id}/result:
     get:
       tags: ["Training"]
-      summary: "#9 작업 결과 조회 (BT-07)"
+      summary: "학습 · 평가 결과 조회 (BT-07)"
       description: |
-        학습 · 평가 결과(평가 지표, Registry 등록 정보)를 조회한다.
-        학습 · 평가 결과 Callback(#7)과 같은 내용이다.
-        학습 종료 후 10분 안에 Callback이 오지 않으면 이 API로 확인한다 (BT-07).
+        학습 · 평가 결과를 조회한다. 응답 항목은 IF-T03과 같다.
+        학습 종료(IF-T02 `status: DONE`) 후 10분 안에 IF-T03이 오지 않으면 이 API로 확인한다 (BT-07).
       operationId: "getTrainingResult"
       parameters:
-      - $ref: "#/components/parameters/training_id"
+      - $ref: "#/components/parameters/run_id"
       responses:
         "200":
           description: "학습 · 평가 결과"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/TrainingResult"
+                $ref: "#/components/schemas/TrainingCompleted"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: "아직 끝나지 않은 작업"
+          description: "결과가 아직 없음 (진행 중, 실패, 취소). 상태는 `GET /trainings/{run_id}`로 확인한다."
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
-  /trainings/{training_id}/cancel:
+              example:
+                type: "https://gpu.internal/problems/conflict"
+                title: "conflict"
+                status: 409
+                detail: "run 'RUN-20261030-001' is RUNNING"
+                instance: "/v1/trainings/RUN-20261030-001/result"
+  /trainings/{run_id}/cancel:
     post:
       tags: ["Training"]
-      summary: "#8 Train Job 취소"
+      summary: "IF-T05 Train Job 취소"
       description: |
-        대기 중이거나 진행 중인 학습을 중단하고 GPU를 반환한다.
-        중단되면 학습 · 평가 결과 Callback(#7)이 `status: canceled`로 한 번 온다.
+        학습 실행을 취소하고 GPU를 반환한다. 취소할 `run_id`는 경로로 보낸다.
+        CPU는 이 실행을 `ABORTED`로 둔다. 취소 후에는 IF-T02 · IF-T03을 보내지 않는다.
+
+        화면: SCR-01 관리자 학습 폐기
       operationId: "cancelTraining"
       parameters:
-      - $ref: "#/components/parameters/training_id"
+      - $ref: "#/components/parameters/run_id"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainingCancel"
       responses:
-        "200":
-          description: "중단됨. 상태는 `canceled`."
+        "202":
+          description: "취소 접수됨"
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/Training"
+                type: object
+                required: [run_id]
+                properties:
+                  run_id:
+                    $ref: "#/components/schemas/RunId"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: "이미 끝난 작업이라 중단할 수 없음"
+          description: "이미 끝난 실행이라 취소할 수 없음"
           content:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/Problem"
- 
- 
-  # ------------------------------------------------------------------ Callback (MRX → 클라이언트)
+              example:
+                type: "https://gpu.internal/problems/conflict"
+                title: "conflict"
+                status: 409
+                detail: "run 'RUN-20261030-001' is already DONE"
+                instance: "/v1/trainings/RUN-20261030-001/cancel"
+
+  # ------------------------------------------------------------------ Callback (GPU → CPU)
   /callbacks/image-stored:
     servers:
     - url: "{client_base_url}"
-      description: "클라이언트 서버 (Callback 수신)"
+      description: "CPU 서버 (Callback 수신)"
       variables:
         client_base_url:
-          default: "http://client.internal"
+          default: "http://cpu.internal"
     post:
       tags: ["Callback"]
-      summary: "#1 이미지 저장 · NAS 이관 결과"
-      description: "이미지 한 장의 저장과 NAS 이관이 끝나면(성공 또는 실패) 보낸다."
+      summary: "IF-S01 이미지 저장 · NAS 이관 결과"
+      description: |
+        이미지를 저장하면 보낸다. **NAS로 옮기면 새 경로로 다시 보낸다.**
+        같은 `inspection_id`가 두 번 올 수 있으며, 나중에 받은 `path`가 현재 위치다.
+
+        화면: SCR-12 이미지 식별 · 검수 뷰어 원본 · 썸네일
       operationId: "onImageStored"
       parameters:
       - $ref: "#/components/parameters/callback_id"
@@ -195,31 +244,24 @@ paths:
         content:
           application/json:
             schema:
-              allOf:
-              - $ref: "#/components/schemas/CallbackEnvelope"
-              - type: object
-                required: ["data"]
-                properties:
-                  type:
-                    const: "image.stored"
-                  source:
-                    example: "/images/img_20261030_000123"
-                  data:
-                    $ref: "#/components/schemas/ImageStoredData"
+              $ref: "#/components/schemas/ImageStored"
       responses:
         "2XX":
           $ref: "#/components/responses/CallbackAccepted"
   /callbacks/label-created:
     servers:
     - url: "{client_base_url}"
-      description: "클라이언트 서버 (Callback 수신)"
+      description: "CPU 서버 (Callback 수신)"
       variables:
         client_base_url:
-          default: "http://client.internal"
+          default: "http://cpu.internal"
     post:
       tags: ["Callback"]
-      summary: "#2 라벨 결과 (이미지 단위)"
-      description: "이미지 한 장의 자동 라벨링이 끝나면 보낸다. 박스가 없는 이미지도 빈 `labels`로 보낸다."
+      summary: "IF-L02 라벨 결과 (이미지 단위)"
+      description: |
+        이미지 한 장의 자동 라벨링이 끝나면 보낸다. 결함이 없으면 `label`을 빈 목록으로 보낸다.
+
+        화면: SCR-12 AI 라벨 · 신뢰도 필터
       operationId: "onLabelCreated"
       parameters:
       - $ref: "#/components/parameters/callback_id"
@@ -230,31 +272,25 @@ paths:
         content:
           application/json:
             schema:
-              allOf:
-              - $ref: "#/components/schemas/CallbackEnvelope"
-              - type: object
-                required: ["data"]
-                properties:
-                  type:
-                    const: "label.created"
-                  source:
-                    example: "/images/img_20261030_000123/labels"
-                  data:
-                    $ref: "#/components/schemas/LabelCreatedData"
+              $ref: "#/components/schemas/LabelCreated"
       responses:
         "2XX":
           $ref: "#/components/responses/CallbackAccepted"
   /callbacks/dataset-completed:
     servers:
     - url: "{client_base_url}"
-      description: "클라이언트 서버 (Callback 수신)"
+      description: "CPU 서버 (Callback 수신)"
       variables:
         client_base_url:
-          default: "http://client.internal"
+          default: "http://cpu.internal"
     post:
       tags: ["Callback"]
-      summary: "#4 Dataset 구성 완료 통보"
-      description: "Dataset 구성 작업이 끝나면(성공 또는 실패) 보낸다. 받지 못하면 `GET /datasets/{dataset_id}`로 확인한다."
+      summary: "IF-L03 Dataset 구성 완료 통보"
+      description: |
+        Dataset 구성이 끝나면 보낸다. **실패도 같은 I/F로** `result: FAILED`와 함께 보낸다.
+        받지 못하면 `GET /datasets/{dataset_id}`로 확인한다.
+
+        화면: SCR-01 상세 · 「Dataset 구성 실패」 · 조치 필요
       operationId: "onDatasetCompleted"
       parameters:
       - $ref: "#/components/parameters/callback_id"
@@ -265,33 +301,44 @@ paths:
         content:
           application/json:
             schema:
-              allOf:
-              - $ref: "#/components/schemas/CallbackEnvelope"
-              - type: object
-                required: ["data"]
-                properties:
-                  type:
-                    const: "dataset.completed"
-                  source:
-                    example: "/v1/datasets/ds_01HZX1A2"
-                  data:
-                    $ref: "#/components/schemas/Dataset"
+              $ref: "#/components/schemas/DatasetCompleted"
+            examples:
+              DONE:
+                summary: "구성 성공"
+                value:
+                  dataset_id: "DS-20261030-001"
+                  result: "DONE"
+                  path: "/gpu-storage/datasets/DS-20261030-001"
+                  total_cnt: 5000
+                  train_cnt: 3500
+                  val_cnt: 1000
+                  test_cnt: 500
+                  label_ver: "LBL-1.3.0"
+              FAILED:
+                summary: "구성 실패"
+                value:
+                  dataset_id: "DS-20261030-001"
+                  result: "FAILED"
+                  fail_reason: "TEST_SET_MIN"
       responses:
         "2XX":
           $ref: "#/components/responses/CallbackAccepted"
   /callbacks/training-progress:
     servers:
     - url: "{client_base_url}"
-      description: "클라이언트 서버 (Callback 수신)"
+      description: "CPU 서버 (Callback 수신)"
       variables:
         client_base_url:
-          default: "http://client.internal"
+          default: "http://cpu.internal"
     post:
       tags: ["Callback"]
-      summary: "#6 학습 진행 상태"
+      summary: "IF-T02 학습 진행 상태"
       description: |
-        학습 중 epoch이 끝날 때마다 보내고, epoch이 길어도 **최소 1분 간격**으로 보낸다.
-        클라이언트는 3분 동안 받지 못하면 `GET /trainings/{training_id}`로 상태를 확인한다 (BT-03).
+        Epoch이 끝날 때마다 보내고, Epoch이 길어도 **최소 1분 간격**으로 보낸다.
+        학습이 끝나면 `status: DONE`, 실패하면 `status: FAILED`로 한 번 더 보낸다.
+        CPU는 3분 동안 받지 못하면 `GET /trainings/{run_id}`로 확인한다 (BT-03).
+
+        화면: SCR-01 단계 · 「Epoch n / N」 · 곡선 · 자원 슬롯 · 조치 필요, SCR-06 학습 산출물 곡선
       operationId: "onTrainingProgress"
       parameters:
       - $ref: "#/components/parameters/callback_id"
@@ -302,33 +349,58 @@ paths:
         content:
           application/json:
             schema:
-              allOf:
-              - $ref: "#/components/schemas/CallbackEnvelope"
-              - type: object
-                required: ["data"]
-                properties:
-                  type:
-                    const: "training.progress"
-                  source:
-                    example: "/v1/trainings/trn_01HZX3K9"
-                  data:
-                    $ref: "#/components/schemas/TrainingProgressData"
+              $ref: "#/components/schemas/TrainingProgress"
+            examples:
+              RUNNING:
+                summary: "진행 중"
+                value:
+                  run_id: "RUN-20261030-001"
+                  status: "RUNNING"
+                  epoch_cur: 37
+                  epoch_total: 100
+                  train_loss: 0.912
+                  val_loss: 1.044
+                  map50: 0.684
+                  precision: 0.771
+                  recall: 0.652
+                  epoch_sec: 84.2
+                  gpu_util: 92.5
+                  gpu_mem: 31.4
+                  gpu_id: "GPU-2"
+                  log_path: "/gpu-storage/runs/RUN-20261030-001/train.log"
+              DONE:
+                summary: "학습 종료"
+                value:
+                  run_id: "RUN-20261030-001"
+                  status: "DONE"
+                  epoch_cur: 100
+                  epoch_total: 100
+              FAILED:
+                summary: "실패"
+                value:
+                  run_id: "RUN-20261030-001"
+                  status: "FAILED"
+                  epoch_cur: 12
+                  epoch_total: 100
+                  fail_reason: "CUDA_OOM"
       responses:
         "2XX":
           $ref: "#/components/responses/CallbackAccepted"
   /callbacks/training-completed:
     servers:
     - url: "{client_base_url}"
-      description: "클라이언트 서버 (Callback 수신)"
+      description: "CPU 서버 (Callback 수신)"
       variables:
         client_base_url:
-          default: "http://client.internal"
+          default: "http://cpu.internal"
     post:
       tags: ["Callback"]
-      summary: "#7 학습 · 평가 결과"
+      summary: "IF-T03 학습 · 평가 결과"
       description: |
-        학습과 평가가 끝나면(성공, 실패, 취소) 보낸다. 성공하면 평가 지표와 Registry 등록 정보가 들어 있다.
-        클라이언트는 학습 종료 후 10분 안에 받지 못하면 `GET /trainings/{training_id}/result`로 확인한다 (BT-07).
+        학습 · 평가가 끝나고 Registry 등록까지 마치면 보낸다. 실패는 IF-T02 `status: FAILED`로 알리고 IF-T03은 보내지 않는다.
+        CPU는 학습 종료 후 10분 안에 받지 못하면 `GET /trainings/{run_id}/result`로 확인한다 (BT-07).
+
+        화면: SCR-06 Spec 판정 · 모델 이력 · 배포 사전 점검, SCR-01 · 06 학습 산출물
       operationId: "onTrainingCompleted"
       parameters:
       - $ref: "#/components/parameters/callback_id"
@@ -339,21 +411,11 @@ paths:
         content:
           application/json:
             schema:
-              allOf:
-              - $ref: "#/components/schemas/CallbackEnvelope"
-              - type: object
-                required: ["data"]
-                properties:
-                  type:
-                    const: "training.completed"
-                  source:
-                    example: "/v1/trainings/trn_01HZX3K9"
-                  data:
-                    $ref: "#/components/schemas/TrainingResult"
+              $ref: "#/components/schemas/TrainingCompleted"
       responses:
         "2XX":
           $ref: "#/components/responses/CallbackAccepted"
- 
+
 components:
   parameters:
     dataset_id:
@@ -361,23 +423,21 @@ components:
       in: path
       required: true
       schema:
-        type: string
-        example: "ds_01HZX1A2"
-    training_id:
-      name: training_id
+        $ref: "#/components/schemas/DatasetId"
+    run_id:
+      name: run_id
       in: path
       required: true
       schema:
-        type: string
-        example: "trn_01HZX3K9"
+        $ref: "#/components/schemas/RunId"
     callback_id:
       name: callback-id
       in: header
       required: true
-      description: "Callback ID. 본문의 `id`와 같음. 중복 제거 기준"
+      description: "Callback 고유 ID. 재시도해도 같은 값. 중복 제거 기준"
       schema:
         type: string
-        example: "evt_01HZY7QW"
+        example: "cb_01HZY7QW"
     callback_timestamp:
       name: callback-timestamp
       in: header
@@ -385,7 +445,7 @@ components:
       description: "발송 시각 (Unix 초). 5분 이상 차이 나면 거부해도 된다."
       schema:
         type: integer
-        example: 1793092800
+        example: 1793325600
     callback_signature:
       name: callback-signature
       in: header
@@ -394,477 +454,564 @@ components:
       schema:
         type: string
         example: "v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4="
- 
+
   responses:
+    DatasetAccepted:
+      description: "접수됨"
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [dataset_id]
+            properties:
+              dataset_id:
+                $ref: "#/components/schemas/DatasetId"
+    TrainingAccepted:
+      description: "접수됨"
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [run_id]
+            properties:
+              run_id:
+                $ref: "#/components/schemas/RunId"
     BadRequest:
-      description: "요청 형식 오류"
+      description: "요청 형식 오류 (필수 항목 누락, 길이 · 형식 위반)"
       content:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+          example:
+            type: "https://gpu.internal/problems/invalid-request"
+            title: "invalid-request"
+            status: 400
+            detail: "split_ratio: must match 'n:n:n'"
     NotFound:
       description: "리소스가 없음"
       content:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
+          example:
+            type: "https://gpu.internal/problems/not-found"
+            title: "not-found"
+            status: 404
+            detail: "'RUN-20261030-001' not found"
+    IdConflict:
+      description: "같은 ID로 다른 내용이 이미 접수됨"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+          example:
+            type: "https://gpu.internal/problems/conflict"
+            title: "conflict"
+            status: 409
+            detail: "dataset_id 'DS-20261030-001' was already accepted with different content"
     CallbackAccepted:
       description: "수신 확인. 본문은 보지 않는다. 2xx가 아니면 재시도한다."
- 
+
   schemas:
     # ---------------------------------------------------------------- 공통
-    JobStatus:
-      type: string
-      enum: [queued, running, succeeded, failed, canceled]
     Problem:
       type: object
       description: "RFC 9457 Problem Details"
       properties:
         type:
           type: string
-          example: "https://mrx.internal/problems/not-found"
+          example: "https://gpu.internal/problems/{code}"
         title:
           type: string
-          example: "리소스가 없음"
+          example: "에러 종류"
         status:
           type: integer
-          example: 404
+          example: 400
         detail:
           type: string
-          example: "training 'trn_01HZX3K9' not found"
+          example: "사람이 읽을 수 있는 상세 설명"
         instance:
           type: string
-          example: "/v1/trainings/trn_01HZX3K9"
-    CallbackEnvelope:
+          example: "/v1/..."
+    InspectionId:
+      type: string
+      maxLength: 40
+      pattern: "^INS-[A-Za-z0-9]+-[0-9]{8}-[0-9]{6}$"
+      description: "검사 ID. `INS-{설비코드}-{YYYYMMDD}-{일련번호 6자리}` · Vision System 채번 · 전 구간 연결 키"
+      example: "INS-EQ3A-20261030-000123"
+    DatasetId:
+      type: string
+      description: "CPU가 매긴 Dataset 식별자"
+      example: "DS-20261030-001"
+    RunId:
+      type: string
+      description: "학습 실행 식별자. `RUN-{날짜}-{일련번호}` · CPU 채번 · 자동 재시도는 새 run_id"
+      example: "RUN-20261030-001"
+    ClassCd:
+      type: string
+      maxLength: 20
+      description: "결함 Class 코드"
+      example: "SCRATCH"
+    FailReason:
+      type: string
+      maxLength: 100
+      description: "실패 사유 코드 (CPU는 100자까지 저장). Runway 사유 코드는 미정"
+    Region:
+      description: |
+        결함 영역. 검출 모델은 BBox, 윤곽선 모델은 Polygon. 좌표는 원본 이미지 픽셀 기준.
+        (좌표 형식은 정의서에 없어 이 문서에서 제안한 형식이다.)
+      oneOf:
+      - $ref: "#/components/schemas/BBoxRegion"
+      - $ref: "#/components/schemas/PolygonRegion"
+    BBoxRegion:
       type: object
-      description: "모든 Callback 본문의 공통 봉투"
-      required: [id, type, source, time]
+      required: [type, x1, y1, x2, y2]
       properties:
-        id:
-          type: string
-          description: "Callback 고유 ID. 재시도해도 같은 값"
-          example: "evt_01HZY7QW"
         type:
-          type: string
-          enum: [image.stored, label.created, dataset.completed, training.progress, training.completed]
-        source:
-          type: string
-          description: "Callback이 가리키는 리소스"
-          example: "/v1/trainings/trn_01HZX3K9"
-        time:
-          type: string
-          format: date-time
-          description: "이벤트 발생 시각"
-          example: "2026-10-30T10:46:00+09:00"
-    BBoxLabel:
+          const: "BBOX"
+        x1:
+          type: number
+          example: 120.5
+        y1:
+          type: number
+          example: 88.0
+        x2:
+          type: number
+          example: 240.25
+        y2:
+          type: number
+          example: 190.75
+    PolygonRegion:
       type: object
-      required: [class_id, class_name, confidence, bbox_xyxy, bbox_xywhn]
+      required: [type, points]
       properties:
-        class_id:
-          type: integer
-          example: 0
-        class_name:
+        type:
+          const: "POLYGON"
+        points:
+          type: array
+          minItems: 3
+          description: "꼭짓점 [x, y] 목록"
+          items:
+            type: array
+            minItems: 2
+            maxItems: 2
+            items:
+              type: number
+          example: [[120.5, 88.0], [240.25, 92.0], [236.0, 190.75], [118.0, 185.5]]
+
+    # ---------------------------------------------------------------- IF-S01
+    ImageStored:
+      type: object
+      description: "IF-S01 이미지 저장 · NAS 이관 결과"
+      required: [inspection_id, path, thumb_path]
+      properties:
+        inspection_id:
+          $ref: "#/components/schemas/InspectionId"
+        path:
           type: string
-          example: "scratch"
+          maxLength: 300
+          description: "이미지 저장 경로. NAS로 옮기면 새 경로로 다시 보낸다"
+          example: "/nas/images/EQ3A/20261030/INS-EQ3A-20261030-000123.png"
+        thumb_path:
+          type: string
+          maxLength: 300
+          description: "썸네일 경로. GPU Storage가 만든 썸네일 (CPU는 썸네일을 만들지 않음 · Q13 확인 필요)"
+          example: "/gpu-storage/thumbs/EQ3A/20261030/INS-EQ3A-20261030-000123.jpg"
+
+    # ---------------------------------------------------------------- IF-L02
+    AiLabel:
+      type: object
+      required: [class_cd, region, confidence]
+      properties:
+        class_cd:
+          $ref: "#/components/schemas/ClassCd"
+        region:
+          $ref: "#/components/schemas/Region"
         confidence:
           type: number
           minimum: 0
           maximum: 1
           example: 0.9312
-        bbox_xyxy:
-          type: array
-          description: "픽셀 좌표 [x1, y1, x2, y2]"
-          items:
-            type: number
-          minItems: 4
-          maxItems: 4
-          example: [120.5, 88.0, 240.25, 190.75]
-        bbox_xywhn:
-          type: array
-          description: "정규화 좌표 [중심 x, 중심 y, 너비, 높이] (YOLO 형식)"
-          items:
-            type: number
-          minItems: 4
-          maxItems: 4
-          example: [0.1758, 0.2154, 0.1121, 0.1597]
- 
-    # ---------------------------------------------------------------- #1, #2
-    ImageStoredData:
+    LabelCreated:
       type: object
-      required: [image_id, status]
+      description: "IF-L02 라벨 결과 (이미지 단위)"
+      required: [inspection_id, label, label_model_ver]
       properties:
-        image_id:
+        inspection_id:
+          $ref: "#/components/schemas/InspectionId"
+        label:
+          type: array
+          description: "결함마다 하나. 결함이 없으면 빈 목록"
+          items:
+            $ref: "#/components/schemas/AiLabel"
+        label_model_ver:
           type: string
-          example: "img_20261030_000123"
-        file_name:
-          type: string
-          example: "LINE3_CAM2_20261030_104512.png"
-        status:
-          type: string
-          enum: [succeeded, failed]
-          description: "저장 · 이관 결과"
-        nas_path:
-          type: [string, "null"]
-          description: "NAS에 저장된 경로. 실패하면 null"
-          example: "/nas/mrx/images/2026/10/30/LINE3_CAM2_20261030_104512.png"
-        size_bytes:
-          type: integer
-          example: 2483120
-        sha256:
-          type: string
-          description: "원본 파일 체크섬"
-          example: "9f2c1b0e4a7d3e58c6b1f0a2d9e4c7b8a1f3e5d7c9b2a4f6e8d0c2b4a6f8e0d2"
-        stored_at:
-          type: string
-          format: date-time
-        error:
-          oneOf:
-          - $ref: "#/components/schemas/Problem"
-          - type: "null"
-          description: "실패 원인. 성공하면 null"
-    LabelCreatedData:
+          maxLength: 20
+          description: "라벨을 붙인 라벨링 모델 버전. Dataset은 단일 버전만 쓴다"
+          example: "LBL-1.3.0"
+
+    # ---------------------------------------------------------------- IF-L01
+    ReviewedLabel:
       type: object
-      required: [image_id, model, width, height, labels]
+      required: [class_cd, region]
       properties:
-        image_id:
+        class_cd:
+          $ref: "#/components/schemas/ClassCd"
+        region:
+          $ref: "#/components/schemas/Region"
+    AutoLabelingItem:
+      type: object
+      title: "Auto Labeling 공정"
+      description: "검수 결과와 최종 라벨을 함께 보낸다"
+      required: [inspection_id, result, labels]
+      properties:
+        inspection_id:
+          $ref: "#/components/schemas/InspectionId"
+        result:
           type: string
-          example: "img_20261030_000123"
-        nas_path:
-          type: string
-          example: "/nas/mrx/images/2026/10/30/LINE3_CAM2_20261030_104512.png"
-        model:
-          type: object
-          description: "라벨링에 쓴 모델"
-          properties:
-            name:
-              type: string
-              example: "defect-detector"
-            version:
-              type: integer
-              example: 3
-        width:
-          type: integer
-          example: 2048
-        height:
-          type: integer
-          example: 1536
+          enum: [OK, MODIFY, DISCARD]
+          description: "검수 결과. OK = AI 라벨 그대로, MODIFY = 수정함, DISCARD = 사용 안 함"
         labels:
           type: array
-          description: "검출된 박스. 없으면 빈 배열"
           items:
-            $ref: "#/components/schemas/BBoxLabel"
-        labeled_at:
-          type: string
-          format: date-time
- 
-    # ---------------------------------------------------------------- #3, #4
-    Split:
+            $ref: "#/components/schemas/ReviewedLabel"
+    FieldLabelingItem:
       type: object
-      description: "학습 · 검증 분할 비율. 합이 1이어야 한다."
+      title: "현장 라벨링 공정 (모델 배포 후)"
+      description: "`inspection_id`만 보낸다"
+      required: [inspection_id]
+      additionalProperties: false
       properties:
-        train:
-          type: number
-          minimum: 0
-          maximum: 1
-          default: 0.8
-        val:
-          type: number
-          minimum: 0
-          maximum: 1
-          default: 0.2
+        inspection_id:
+          $ref: "#/components/schemas/InspectionId"
     DatasetCreate:
       type: object
-      required: [images, min_confidence]
+      description: "IF-L01 Dataset 구성 지시"
+      required: [job_id, group_id, ppid, position_id, dataset_id, dataset_no, split_ratio, test_min_cnt, label_list]
       properties:
-        images:
-          type: object
-          description: "데이터셋에 넣을 이미지. `image_ids`나 `labeled_from`·`labeled_to` 중 하나로 지정한다."
-          properties:
-            image_ids:
-              type: array
-              items:
-                type: string
-              example: ["img_20261030_000123", "img_20261030_000124"]
-            labeled_from:
-              type: string
-              format: date-time
-              description: "이 시각 이후에 라벨링된 이미지"
-              example: "2026-10-23T00:00:00+09:00"
-            labeled_to:
-              type: string
-              format: date-time
-              description: "이 시각 이전에 라벨링된 이미지"
-              example: "2026-10-30T00:00:00+09:00"
-        min_confidence:
-          type: number
-          minimum: 0
-          maximum: 1
-          description: "이 값 이상인 라벨만 사용"
-          example: 0.9
-        split:
-          $ref: "#/components/schemas/Split"
+        job_id:
+          type: string
+          maxLength: 80
+          description: "대상 Job"
+          example: "JOB-EQ3A-P1001-POS02"
+        group_id:
+          type: string
+          description: "Job Key: EQP Group"
+          example: "EQ3A"
+        ppid:
+          type: string
+          description: "Job Key: 제품"
+          example: "P1001"
+        position_id:
+          type: string
+          description: "Job Key: Position"
+          example: "POS02"
+        dataset_id:
+          $ref: "#/components/schemas/DatasetId"
+        dataset_no:
+          type: integer
+          minimum: 1
+          description: "Dataset 번호. Job 안 최대값 + 1 (CPU 채번)"
+          example: 4
         base_dataset_id:
           type: string
-          description: "이 데이터셋에 더해서 만들 때만 지정"
-          example: "ds_01HZW0Z9"
-        idempotency_key:
+          description: "**C** · 기존 Dataset에 추가 수집할 때 기준 Dataset. 이때 Test Set은 기준 Dataset 것을 고정해서 쓴다"
+          example: "DS-20261023-002"
+        split_ratio:
           type: string
-          maxLength: 128
-          description: "같은 키로 다시 요청하면 새로 만들지 않고 기존 작업을 돌려준다"
-    Dataset:
+          pattern: "^[0-9]{1,3}:[0-9]{1,3}:[0-9]{1,3}$"
+          description: "학습 : 검증 : 시험 분할 비율 (SCR-02 판정 기준)"
+          example: "70:20:10"
+        test_min_cnt:
+          type: [integer, "null"]
+          minimum: 0
+          description: "Test Set 최소 수량 (SCR-02 판정 기준). 기준 값이 없으면 null"
+          example: 200
+        label_list:
+          type: array
+          minItems: 1
+          description: |
+            Dataset에 넣을 이미지와 라벨.
+            - Auto Labeling 공정: `{inspection_id, result, labels[]}`
+            - 현장 라벨링 공정(모델 배포 후): `{inspection_id}`만
+
+            Pool에서 편입한 이미지 중 지금 Class 정의에 없는 Class는 제외한다.
+            첫 Job이 만든 새 Class 코드가 들어갈 수 있다 (10-29 · Q16).
+          items:
+            oneOf:
+            - $ref: "#/components/schemas/AutoLabelingItem"
+            - $ref: "#/components/schemas/FieldLabelingItem"
+
+    # ---------------------------------------------------------------- IF-L03
+    DatasetResultFields:
       type: object
-      required: [dataset_id, status, created_at]
       properties:
         dataset_id:
+          $ref: "#/components/schemas/DatasetId"
+        path:
           type: string
-          example: "ds_01HZX1A2"
-        status:
-          $ref: "#/components/schemas/JobStatus"
-        min_confidence:
-          type: number
-          example: 0.9
-        split:
-          $ref: "#/components/schemas/Split"
-        base_dataset_id:
-          type: [string, "null"]
-        num_images:
-          type: object
-          description: "분할별 이미지 수. 완료 후에 채워진다."
-          properties:
-            train:
-              type: integer
-              example: 3800
-            val:
-              type: integer
-              example: 950
-        num_excluded_labels:
+          maxLength: 300
+          description: "**C** · Dataset 저장 경로. DONE이면 필수 (정의서 v3.1은 Y)"
+          example: "/gpu-storage/datasets/DS-20261030-001"
+        total_cnt:
           type: integer
-          description: "신뢰도 기준 미만이라 제외된 라벨 수"
-          example: 2410
-        class_counts:
-          type: object
-          additionalProperties:
-            type: integer
-          example:
-            scratch: 8120
-            dent: 3302
-        storage_path:
-          type: [string, "null"]
-          description: "구성된 데이터셋 위치"
-          example: "/nas/mrx/datasets/ds_01HZX1A2"
-        error:
-          oneOf:
-          - $ref: "#/components/schemas/Problem"
-          - type: "null"
-        created_at:
+          description: "**C** · 총 건수. DONE이면 필수"
+          example: 5000
+        train_cnt:
+          type: integer
+          description: "**C** · 학습 건수. DONE이면 필수"
+          example: 3500
+        val_cnt:
+          type: integer
+          description: "**C** · 검증 건수. DONE이면 필수"
+          example: 1000
+        test_cnt:
+          type: integer
+          description: "**C** · 시험 건수. DONE이면 필수. 이미지별 분할 정보는 보내지 않는다"
+          example: 500
+        label_ver:
           type: string
-          format: date-time
-        finished_at:
-          type: [string, "null"]
-          format: date-time
- 
-    # ---------------------------------------------------------------- #5 ~ #9
+          maxLength: 20
+          description: "**C** · Dataset에 쓰인 라벨 버전(단일). DONE이면 필수"
+          example: "LBL-1.3.0"
+        fail_reason:
+          allOf:
+          - $ref: "#/components/schemas/FailReason"
+          description: "**C** · FAILED이면 필수. 예: TEST_SET_MIN (모의값)"
+          example: "TEST_SET_MIN"
+    DatasetCompleted:
+      description: "IF-L03 Dataset 구성 완료 통보"
+      allOf:
+      - $ref: "#/components/schemas/DatasetResultFields"
+      - type: object
+        required: [dataset_id, result]
+        properties:
+          result:
+            type: string
+            enum: [DONE, FAILED]
+            description: "구성 결과. 실패도 같은 I/F로 보낸다"
+      - if:
+          properties:
+            result:
+              const: "DONE"
+        then:
+          required: [path, total_cnt, train_cnt, val_cnt, test_cnt, label_ver]
+      - if:
+          properties:
+            result:
+              const: "FAILED"
+        then:
+          required: [fail_reason]
+    DatasetStatus:
+      description: "Dataset 상태 조회 응답. 항목은 IF-L03과 같고, 구성 중이면 `result`가 `RUNNING`(조회 전용 값)이다."
+      allOf:
+      - $ref: "#/components/schemas/DatasetResultFields"
+      - type: object
+        required: [dataset_id, result]
+        properties:
+          result:
+            type: string
+            enum: [RUNNING, DONE, FAILED]
+
+    # ---------------------------------------------------------------- IF-T01, IF-T05
     TrainingCreate:
       type: object
-      required: [dataset_id, config]
+      description: "IF-T01 Train 작업 지시"
+      required: [job_id, run_id, dataset_id, model_id, model_version]
       properties:
+        job_id:
+          type: string
+          maxLength: 80
+          description: "대상 Job"
+          example: "JOB-EQ3A-P1001-POS02"
+        run_id:
+          $ref: "#/components/schemas/RunId"
         dataset_id:
+          allOf:
+          - $ref: "#/components/schemas/DatasetId"
+          description: "학습할 Dataset (IF-L03으로 받은 값)"
+        model_id:
           type: string
-          description: "학습에 쓸 데이터셋 (구성 완료 상태)"
-          example: "ds_01HZX1A2"
-        eval_dataset_id:
+          description: "CPU가 매긴 모델 이름 `{Group}_{PPID}_{Position}_M`. Trainer는 이 이름으로 Registry에 등록한다"
+          example: "EQ3A_P1001_POS02_M"
+        model_version:
           type: string
-          description: "평가에 쓸 고정 데이터셋. 없으면 `dataset_id`의 검증 분할로 평가"
-          example: "ds_eval_golden_v1"
-        base_model:
-          type: object
-          description: "이어서 학습할 Registry 모델. 없으면 처음부터 학습"
-          properties:
-            name:
-              type: string
-              example: "defect-detector"
-            version:
-              type: integer
-              example: 3
-        config:
-          type: object
-          required: [model_arch, epochs]
-          properties:
-            model_arch:
-              type: string
-              example: "yolo11m"
-            epochs:
-              type: integer
-              minimum: 1
-              example: 100
-            batch_size:
-              type: integer
-              minimum: 1
-              default: 16
-            learning_rate:
-              type: number
-              default: 0.001
-            image_size:
-              type: integer
-              default: 640
-        resources:
-          type: object
-          properties:
-            gpu_count:
-              type: integer
-              minimum: 1
-              default: 1
-        idempotency_key:
+          pattern: "^[0-9]+\\.[0-9]+\\.0$"
+          description: "CPU가 매긴 모델 버전 `X.Y.0`. Trainer는 이 버전으로 Registry에 등록한다"
+          example: "1.4.0"
+        base_model_id:
           type: string
-          maxLength: 128
-    Progress:
+          description: |
+            **C** · 이어서 학습할 기준 모델. 그 Job Key에 배포된 모델이 있으면 필수, 없으면 생략하고 처음부터 학습한다.
+            Retrain 파생 그룹은 자기 모델 배포 전까지 생략한다.
+          example: "EQ3A_P1001_POS02_M"
+        base_model_version:
+          type: string
+          description: "**C** · 기준 모델 버전. `base_model_id`와 함께 보낸다"
+          example: "1.3.0"
+      dependentRequired:
+        base_model_id: [base_model_version]
+        base_model_version: [base_model_id]
+    TrainingCancel:
+      type: object
+      description: "IF-T05 Train Job 취소. `run_id`는 경로로 보낸다"
+      required: [reason]
+      properties:
+        reason:
+          type: string
+          enum: [ADMIN_DISCARD]
+          description: "ADMIN_DISCARD = 관리자 학습 폐기"
+
+    # ---------------------------------------------------------------- IF-T02
+    TrainingProgressFields:
       type: object
       properties:
-        epoch:
+        run_id:
+          $ref: "#/components/schemas/RunId"
+        epoch_cur:
           type: integer
-          description: "끝난 epoch 수"
+          minimum: 0
+          description: "현재 Epoch. 진행률은 CPU가 계산한다"
           example: 37
-        total_epochs:
+        epoch_total:
           type: integer
+          minimum: 1
+          description: "전체 Epoch"
           example: 100
-        percent:
+        train_loss:
           type: number
-          example: 37.0
-        phase:
+          description: "**O** · 학습 Loss (정의서 v3.1은 Y · 있으면 저장)"
+          example: 0.912
+        val_loss:
+          type: number
+          description: "**O** · 검증 Loss. 곡선 표시와 이상 감지(검증 Loss 연속 증가)에 쓴다 (정의서 v3.1은 Y)"
+          example: 1.044
+        map50:
+          type: number
+          description: "**O** · Epoch 완료 시점 mAP50 (정의서 v3.1은 Y)"
+          example: 0.684
+        precision:
+          type: number
+          description: "**O** · Epoch 완료 시점 Precision (정의서 v3.1은 Y)"
+          example: 0.771
+        recall:
+          type: number
+          description: "**O** · Epoch 완료 시점 Recall (정의서 v3.1은 Y)"
+          example: 0.652
+        epoch_sec:
+          type: number
+          description: "**O** · Epoch 소요 시간(초). CPU는 받지만 저장하지 않는다 (정의서 v3.1은 Y)"
+          example: 84.2
+        gpu_util:
+          type: number
+          description: "**O** · GPU 사용률(%)"
+          example: 92.5
+        gpu_mem:
+          type: number
+          description: "**O** · GPU 메모리 사용량 (단위 미정)"
+          example: 31.4
+        gpu_id:
           type: string
-          enum: [preparing, training, evaluating, registering]
-          description: "현재 단계"
-          example: "training"
-        eta_seconds:
-          type: [integer, "null"]
-          description: "예상 남은 시간"
-          example: 5400
-    Training:
-      type: object
-      required: [training_id, dataset_id, status, created_at]
-      properties:
-        training_id:
+          description: "**O** · 사용 GPU 슬롯"
+          example: "GPU-2"
+        log_path:
           type: string
-          example: "trn_01HZX3K9"
-        dataset_id:
-          type: string
-          example: "ds_01HZX1A2"
-        status:
-          $ref: "#/components/schemas/JobStatus"
-        progress:
-          $ref: "#/components/schemas/Progress"
-        last_reported_at:
-          type: [string, "null"]
-          format: date-time
-          description: "마지막으로 학습 진행 상태 Callback(#6)을 보낸 시각"
-        error:
-          oneOf:
-          - $ref: "#/components/schemas/Problem"
-          - type: "null"
-        created_at:
-          type: string
-          format: date-time
-        started_at:
-          type: [string, "null"]
-          format: date-time
-        finished_at:
-          type: [string, "null"]
-          format: date-time
-    TrainingProgressData:
-      type: object
-      required: [training_id, sequence, status, progress]
-      properties:
-        training_id:
-          type: string
-          example: "trn_01HZX3K9"
-        sequence:
-          type: integer
-          description: "학습마다 1부터 1씩 늘어나는 보고 번호. 더 작은 번호가 늦게 오면 무시한다."
-          example: 42
-        status:
-          $ref: "#/components/schemas/JobStatus"
-          example: "running"
-        progress:
-          $ref: "#/components/schemas/Progress"
-        metrics:
-          type: object
-          description: "마지막으로 끝난 epoch의 지표"
-          additionalProperties:
-            type: number
-          example:
-            train/box_loss: 0.912
-            val/mAP50: 0.684
-    RegistryInfo:
-      type: object
-      description: "Registry 등록 정보"
-      required: [name, version, uri]
-      properties:
-        name:
-          type: string
-          example: "defect-detector"
-        version:
-          type: integer
-          example: 4
-        uri:
-          type: string
-          description: "모델 가중치 위치"
-          example: "/nas/mrx/registry/defect-detector/4/best.pt"
-        stage:
-          type: string
-          enum: [candidate, approved]
-          description: "등록 직후에는 candidate"
-          example: "candidate"
-        registered_at:
-          type: string
-          format: date-time
-    TrainingResult:
-      type: object
-      required: [training_id, status]
-      properties:
-        training_id:
-          type: string
-          example: "trn_01HZX3K9"
-        status:
-          type: string
-          enum: [succeeded, failed, canceled]
-        evaluation:
-          type: [object, "null"]
-          description: "평가 결과. 성공했을 때만 있음"
+          description: "**O** · 학습 로그 경로. 로그 파일은 GPU에 보관 (화면 조회는 보류 · Q12)"
+          example: "/gpu-storage/runs/RUN-20261030-001/train.log"
+        fail_reason:
+          allOf:
+          - $ref: "#/components/schemas/FailReason"
+          description: "**C** · FAILED이면 필수. 예: CUDA_OOM (모의값)"
+          example: "CUDA_OOM"
+    TrainingProgress:
+      description: "IF-T02 학습 진행 상태"
+      allOf:
+      - $ref: "#/components/schemas/TrainingProgressFields"
+      - type: object
+        required: [run_id, status, epoch_cur, epoch_total]
+        properties:
+          status:
+            type: string
+            enum: [RUNNING, DONE, FAILED]
+            description: "CPU는 FAILED를 FAIL로 저장한다"
+            example: "RUNNING"
+      - if:
           properties:
-            eval_dataset_id:
-              type: string
-              example: "ds_eval_golden_v1"
-            metrics:
-              type: object
-              additionalProperties:
-                type: number
-              example:
-                mAP50: 0.742
-                mAP50-95: 0.531
-                precision: 0.801
-                recall: 0.688
-            per_class:
-              type: object
-              description: "클래스별 지표"
-              additionalProperties:
-                type: object
-                additionalProperties:
-                  type: number
-              example:
-                scratch:
-                  mAP50: 0.781
-                dent:
-                  mAP50: 0.702
-        registry:
-          oneOf:
-          - $ref: "#/components/schemas/RegistryInfo"
-          - type: "null"
-          description: "Registry 등록 정보. 성공했을 때만 있음"
-        error:
-          oneOf:
-          - $ref: "#/components/schemas/Problem"
-          - type: "null"
-        finished_at:
+            status:
+              const: "FAILED"
+        then:
+          required: [fail_reason]
+    TrainingStatus:
+      description: |
+        학습 상태 조회 응답. 항목은 IF-T02와 같다.
+        `status`에 조회 전용 값 `QUEUED`(시작 전), `ABORTED`(취소됨)가 더 있다.
+      allOf:
+      - $ref: "#/components/schemas/TrainingProgressFields"
+      - type: object
+        required: [run_id, status]
+        properties:
+          status:
+            type: string
+            enum: [QUEUED, RUNNING, DONE, FAILED, ABORTED]
+            example: "RUNNING"
+          last_reported_at:
+            type: [string, "null"]
+            format: date-time
+            description: "마지막으로 IF-T02를 보낸 시각"
+
+    # ---------------------------------------------------------------- IF-T03
+    TrainingCompleted:
+      type: object
+      description: "IF-T03 학습 · 평가 결과"
+      required: [run_id, model_id, model_version, final_metrics, confusion_matrix, registry_path, file_hash, framework]
+      properties:
+        run_id:
+          $ref: "#/components/schemas/RunId"
+        model_id:
           type: string
-          format: date-time
- 
+          description: "Registry에 등록한 모델. IF-T01로 지정한 값과 같아야 한다"
+          example: "EQ3A_P1001_POS02_M"
+        model_version:
+          type: string
+          description: "Registry에 등록한 버전. IF-T01로 지정한 값과 같아야 한다"
+          example: "1.4.0"
+        final_metrics:
+          type: object
+          description: "평가 Spec 4항목. CPU 판정 입력 (지표 단위는 Runway 협의)"
+          required: [map, ng_recall, over_rate, under_rate]
+          properties:
+            map:
+              type: number
+              example: 0.742
+            ng_recall:
+              type: number
+              example: 0.981
+            over_rate:
+              type: number
+              description: "과검률"
+              example: 0.035
+            under_rate:
+              type: number
+              description: "미검률"
+              example: 0.019
+        confusion_matrix:
+          type: object
+          description: "예측 매트릭스. 모양 미정 (모의 `{labels, matrix}`) · CPU는 받은 모양 그대로 표시한다"
+          example:
+            labels: ["OK", "SCRATCH", "DENT"]
+            matrix: [[480, 6, 2], [4, 211, 3], [1, 2, 96]]
+        registry_path:
+          type: string
+          maxLength: 300
+          description: "Registry 경로. 배포 지시(IF-D01)에 쓴다"
+          example: "/registry/EQ3A_P1001_POS02_M/1.4.0/model.onnx"
+        file_hash:
+          type: string
+          maxLength: 80
+          description: "모델 파일 해시. 배포 지시(IF-D01)에 쓴다"
+          example: "sha256:9f2c1b0e4a7d3e58c6b1f0a2d9e4c7b8a1f3e5d7c9b2a4f6e8d0c2b4a6f8e0d2"
+        framework:
+          type: string
+          maxLength: 30
+          description: "모델 Framework. Edge Runtime 호환 판정에 쓴다 (호환 기준은 Runway 협의)"
+          example: "ONNX"
