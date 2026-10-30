@@ -1,45 +1,9 @@
-Swagger interface · YAML
+---
 openapi: 3.1.0
 info:
-  title: "MRX 연동 인터페이스"
+  title: "JB"
   version: "0.1.0"
   description: |
-    클라이언트(상대 시스템)와 MRX 사이의 연동 인터페이스.
- 
-    - **Send**: 클라이언트가 MRX의 REST API를 호출한다. → `paths`
-    - **Recv**: MRX가 클라이언트의 수신 URL로 REST Callback을 보낸다. → `webhooks`
- 
-    ## 인터페이스 목록
- 
-    | # | 인터페이스 | 방향 | 이 문서에서 |
-    |---|---|---|---|
-    | 1 | 이미지 저장 · NAS 이관 결과 | Recv | webhook `image.stored` |
-    | 2 | 라벨 결과 수신 (이미지 단위) | Recv | webhook `label.created` |
-    | 3 | Dataset 구성 지시 | Send | `POST /datasets` |
-    | 4 | Dataset 구성 완료 통보 | Recv | webhook `dataset.completed` (미수신 시 `GET /datasets/{dataset_id}`) |
-    | 5 | Train 작업 지시 | Send | `POST /trainings` |
-    | 6 | 학습 진행 상태 | Recv | webhook `training.progress` (3분 무보고 시 `GET /trainings/{training_id}` · BT-03) |
-    | 7 | 학습 · 평가 결과 | Recv | webhook `training.completed` (10분 미수신 시 `GET /trainings/{training_id}/result` · BT-07) |
-    | 8 | Train Job 취소 | Send | `POST /trainings/{training_id}/cancel` |
-    | 9 | 작업 상태 · 결과 조회 (train · eval) | Send | `GET /trainings/{training_id}`, `GET /trainings/{training_id}/result` |
- 
-    ## 비동기 작업
-    Dataset 구성과 학습은 등록 즉시 `202 Accepted`와 `queued` 상태를 돌려주고, 결과는 Callback으로 알린다.
- 
-    상태: `queued` → `running` → `succeeded` | `failed` | `canceled`
- 
-    ## Callback 공통 규칙
-    - 수신 URL은 시스템 간 사전 협의로 MRX 설정에 등록한다. 이벤트 종류별로 다른 URL을 쓸 수 있다.
-    - 본문은 공통 봉투(`CallbackEnvelope`: `id`, `type`, `source`, `time`) 안에 이벤트별 `data`를 담는다.
-    - 헤더: `webhook-id`, `webhook-timestamp`(Unix 초), `webhook-signature`(HMAC-SHA256)
-    - 받는 쪽은 10초 안에 2xx로 응답한다. 처리는 응답 뒤에 한다.
-    - 2xx가 아니면 1분, 5분, 30분, 2시간 간격으로 재시도한다.
-    - 같은 Callback이 두 번 이상 올 수 있다. 받는 쪽은 `id`로 중복을 거른다.
-    - 도착 순서는 보장하지 않는다. `training.progress`는 `sequence`로 순서를 판단한다.
-    - Callback이 오지 않을 때는 조회 API로 상태를 맞춘다 (#4, #6, #7).
- 
-    ## 에러
-    모든 에러는 RFC 9457 Problem Details 형식(`Problem`)으로 응답한다.
 servers:
 - url: "http://{host}/v1"
   variables:
