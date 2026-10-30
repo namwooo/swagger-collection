@@ -1,0 +1,866 @@
+Swagger interface · YAML
+openapi: 3.1.0
+info:
+  title: "MRX 연동 인터페이스"
+  version: "0.1.0"
+  description: |
+    클라이언트(상대 시스템)와 MRX 사이의 연동 인터페이스.
+ 
+    - **Send**: 클라이언트가 MRX의 REST API를 호출한다. → `paths`
+    - **Recv**: MRX가 클라이언트의 수신 URL로 REST Callback을 보낸다. → `webhooks`
+ 
+    ## 인터페이스 목록
+ 
+    | # | 인터페이스 | 방향 | 이 문서에서 |
+    |---|---|---|---|
+    | 1 | 이미지 저장 · NAS 이관 결과 | Recv | webhook `image.stored` |
+    | 2 | 라벨 결과 수신 (이미지 단위) | Recv | webhook `label.created` |
+    | 3 | Dataset 구성 지시 | Send | `POST /datasets` |
+    | 4 | Dataset 구성 완료 통보 | Recv | webhook `dataset.completed` (미수신 시 `GET /datasets/{dataset_id}`) |
+    | 5 | Train 작업 지시 | Send | `POST /trainings` |
+    | 6 | 학습 진행 상태 | Recv | webhook `training.progress` (3분 무보고 시 `GET /trainings/{training_id}` · BT-03) |
+    | 7 | 학습 · 평가 결과 | Recv | webhook `training.completed` (10분 미수신 시 `GET /trainings/{training_id}/result` · BT-07) |
+    | 8 | Train Job 취소 | Send | `POST /trainings/{training_id}/cancel` |
+    | 9 | 작업 상태 · 결과 조회 (train · eval) | Send | `GET /trainings/{training_id}`, `GET /trainings/{training_id}/result` |
+ 
+    ## 비동기 작업
+    Dataset 구성과 학습은 등록 즉시 `202 Accepted`와 `queued` 상태를 돌려주고, 결과는 Callback으로 알린다.
+ 
+    상태: `queued` → `running` → `succeeded` | `failed` | `canceled`
+ 
+    ## Callback 공통 규칙
+    - 수신 URL은 시스템 간 사전 협의로 MRX 설정에 등록한다. 이벤트 종류별로 다른 URL을 쓸 수 있다.
+    - 본문은 공통 봉투(`CallbackEnvelope`: `id`, `type`, `source`, `time`) 안에 이벤트별 `data`를 담는다.
+    - 헤더: `webhook-id`, `webhook-timestamp`(Unix 초), `webhook-signature`(HMAC-SHA256)
+    - 받는 쪽은 10초 안에 2xx로 응답한다. 처리는 응답 뒤에 한다.
+    - 2xx가 아니면 1분, 5분, 30분, 2시간 간격으로 재시도한다.
+    - 같은 Callback이 두 번 이상 올 수 있다. 받는 쪽은 `id`로 중복을 거른다.
+    - 도착 순서는 보장하지 않는다. `training.progress`는 `sequence`로 순서를 판단한다.
+    - Callback이 오지 않을 때는 조회 API로 상태를 맞춘다 (#4, #6, #7).
+ 
+    ## 에러
+    모든 에러는 RFC 9457 Problem Details 형식(`Problem`)으로 응답한다.
+servers:
+- url: "http://{host}/v1"
+  variables:
+    host:
+      default: "mrx.internal:8000"
+tags:
+- name: "Dataset"
+  description: "Dataset 구성 (#3, #4)"
+- name: "Training"
+  description: "학습 지시 · 취소 · 조회 (#5 ~ #9)"
+- name: "Callback"
+  description: "MRX → 클라이언트 Callback (#1, #2, #4, #6, #7). 클라이언트가 구현한다."
+ 
+paths:
+  # ------------------------------------------------------------------ Dataset
+  /datasets:
+    post:
+      tags: ["Dataset"]
+      summary: "#3 Dataset 구성 지시"
+      description: |
+        라벨 결과를 모아 학습용 데이터셋을 구성하는 작업을 등록한다.
+        끝나면 `dataset.completed` Callback(#4)을 보낸다.
+      operationId: "createDataset"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DatasetCreate"
+      responses:
+        "202":
+          description: "접수됨. 상태는 `queued`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: "지정한 이미지나 기반 데이터셋이 없음"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /datasets/{dataset_id}:
+    get:
+      tags: ["Dataset"]
+      summary: "Dataset 상태 조회 (#4 미수신 시)"
+      description: "`dataset.completed` Callback을 받지 못했을 때 상태를 확인한다."
+      operationId: "getDataset"
+      parameters:
+      - $ref: "#/components/parameters/dataset_id"
+      responses:
+        "200":
+          description: "데이터셋"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Dataset"
+        "404":
+          $ref: "#/components/responses/NotFound"
+ 
+  # ------------------------------------------------------------------ Training
+  /trainings:
+    post:
+      tags: ["Training"]
+      summary: "#5 Train 작업 지시"
+      description: |
+        데이터셋으로 학습 작업을 등록한다. 학습이 끝나면 평가까지 이어서 수행하고,
+        진행 중에는 `training.progress`(#6), 끝나면 `training.completed`(#7) Callback을 보낸다.
+      operationId: "createTraining"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TrainingCreate"
+      responses:
+        "202":
+          description: "접수됨. 상태는 `queued`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Training"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: "지정한 데이터셋이나 모델이 없음"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "409":
+          description: "데이터셋 구성이 끝나지 않았거나, 요청한 GPU를 할당할 수 없음"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /trainings/{training_id}:
+    get:
+      tags: ["Training"]
+      summary: "#9 작업 상태 조회 (BT-03)"
+      description: |
+        학습 · 평가 작업의 현재 상태와 진행률을 조회한다.
+        `training.progress` Callback이 3분 동안 오지 않으면 이 API로 확인한다 (BT-03).
+      operationId: "getTraining"
+      parameters:
+      - $ref: "#/components/parameters/training_id"
+      responses:
+        "200":
+          description: "학습 작업"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Training"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /trainings/{training_id}/result:
+    get:
+      tags: ["Training"]
+      summary: "#9 작업 결과 조회 (BT-07)"
+      description: |
+        학습 · 평가 결과(평가 지표, Registry 등록 정보)를 조회한다.
+        `training.completed` Callback(#7)과 같은 내용이다.
+        학습 종료 후 10분 안에 Callback이 오지 않으면 이 API로 확인한다 (BT-07).
+      operationId: "getTrainingResult"
+      parameters:
+      - $ref: "#/components/parameters/training_id"
+      responses:
+        "200":
+          description: "학습 · 평가 결과"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TrainingResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "아직 끝나지 않은 작업"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+  /trainings/{training_id}/cancel:
+    post:
+      tags: ["Training"]
+      summary: "#8 Train Job 취소"
+      description: |
+        대기 중이거나 진행 중인 학습을 중단하고 GPU를 반환한다.
+        중단되면 `training.completed` Callback이 `status: canceled`로 한 번 온다.
+      operationId: "cancelTraining"
+      parameters:
+      - $ref: "#/components/parameters/training_id"
+      responses:
+        "200":
+          description: "중단됨. 상태는 `canceled`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Training"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "이미 끝난 작업이라 중단할 수 없음"
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+ 
+# -------------------------------------------------------------------- Callbacks
+webhooks:
+  image.stored:
+    post:
+      tags: ["Callback"]
+      summary: "#1 이미지 저장 · NAS 이관 결과"
+      description: "이미지 한 장의 저장과 NAS 이관이 끝나면(성공 또는 실패) 보낸다."
+      operationId: "onImageStored"
+      parameters:
+      - $ref: "#/components/parameters/webhook_id"
+      - $ref: "#/components/parameters/webhook_timestamp"
+      - $ref: "#/components/parameters/webhook_signature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: "#/components/schemas/CallbackEnvelope"
+              - type: object
+                required: ["data"]
+                properties:
+                  type:
+                    const: "image.stored"
+                  data:
+                    $ref: "#/components/schemas/ImageStoredData"
+      responses:
+        "2XX":
+          $ref: "#/components/responses/CallbackAccepted"
+  label.created:
+    post:
+      tags: ["Callback"]
+      summary: "#2 라벨 결과 (이미지 단위)"
+      description: "이미지 한 장의 자동 라벨링이 끝나면 보낸다. 박스가 없는 이미지도 빈 `labels`로 보낸다."
+      operationId: "onLabelCreated"
+      parameters:
+      - $ref: "#/components/parameters/webhook_id"
+      - $ref: "#/components/parameters/webhook_timestamp"
+      - $ref: "#/components/parameters/webhook_signature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: "#/components/schemas/CallbackEnvelope"
+              - type: object
+                required: ["data"]
+                properties:
+                  type:
+                    const: "label.created"
+                  data:
+                    $ref: "#/components/schemas/LabelCreatedData"
+      responses:
+        "2XX":
+          $ref: "#/components/responses/CallbackAccepted"
+  dataset.completed:
+    post:
+      tags: ["Callback"]
+      summary: "#4 Dataset 구성 완료 통보"
+      description: "Dataset 구성 작업이 끝나면(성공 또는 실패) 보낸다. 받지 못하면 `GET /datasets/{dataset_id}`로 확인한다."
+      operationId: "onDatasetCompleted"
+      parameters:
+      - $ref: "#/components/parameters/webhook_id"
+      - $ref: "#/components/parameters/webhook_timestamp"
+      - $ref: "#/components/parameters/webhook_signature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: "#/components/schemas/CallbackEnvelope"
+              - type: object
+                required: ["data"]
+                properties:
+                  type:
+                    const: "dataset.completed"
+                  data:
+                    $ref: "#/components/schemas/Dataset"
+      responses:
+        "2XX":
+          $ref: "#/components/responses/CallbackAccepted"
+  training.progress:
+    post:
+      tags: ["Callback"]
+      summary: "#6 학습 진행 상태"
+      description: |
+        학습 중 epoch이 끝날 때마다 보내고, epoch이 길어도 **최소 1분 간격**으로 보낸다.
+        클라이언트는 3분 동안 받지 못하면 `GET /trainings/{training_id}`로 상태를 확인한다 (BT-03).
+      operationId: "onTrainingProgress"
+      parameters:
+      - $ref: "#/components/parameters/webhook_id"
+      - $ref: "#/components/parameters/webhook_timestamp"
+      - $ref: "#/components/parameters/webhook_signature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: "#/components/schemas/CallbackEnvelope"
+              - type: object
+                required: ["data"]
+                properties:
+                  type:
+                    const: "training.progress"
+                  data:
+                    $ref: "#/components/schemas/TrainingProgressData"
+      responses:
+        "2XX":
+          $ref: "#/components/responses/CallbackAccepted"
+  training.completed:
+    post:
+      tags: ["Callback"]
+      summary: "#7 학습 · 평가 결과"
+      description: |
+        학습과 평가가 끝나면(성공, 실패, 취소) 보낸다. 성공하면 평가 지표와 Registry 등록 정보가 들어 있다.
+        클라이언트는 학습 종료 후 10분 안에 받지 못하면 `GET /trainings/{training_id}/result`로 확인한다 (BT-07).
+      operationId: "onTrainingCompleted"
+      parameters:
+      - $ref: "#/components/parameters/webhook_id"
+      - $ref: "#/components/parameters/webhook_timestamp"
+      - $ref: "#/components/parameters/webhook_signature"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+              - $ref: "#/components/schemas/CallbackEnvelope"
+              - type: object
+                required: ["data"]
+                properties:
+                  type:
+                    const: "training.completed"
+                  data:
+                    $ref: "#/components/schemas/TrainingResult"
+      responses:
+        "2XX":
+          $ref: "#/components/responses/CallbackAccepted"
+ 
+components:
+  parameters:
+    dataset_id:
+      name: dataset_id
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "ds_01HZX1A2"
+    training_id:
+      name: training_id
+      in: path
+      required: true
+      schema:
+        type: string
+        example: "trn_01HZX3K9"
+    webhook_id:
+      name: webhook-id
+      in: header
+      required: true
+      description: "Callback ID. 본문의 `id`와 같음. 중복 제거 기준"
+      schema:
+        type: string
+        example: "evt_01HZY7QW"
+    webhook_timestamp:
+      name: webhook-timestamp
+      in: header
+      required: true
+      description: "발송 시각 (Unix 초). 5분 이상 차이 나면 거부해도 된다."
+      schema:
+        type: integer
+        example: 1793092800
+    webhook_signature:
+      name: webhook-signature
+      in: header
+      required: true
+      description: "`{webhook-id}.{webhook-timestamp}.{본문}`을 공유 비밀키로 HMAC-SHA256 서명한 값 (Base64)"
+      schema:
+        type: string
+        example: "v1,K5oZfzN95Z9UVu1EsfQmfVNQhnkZ2pj9o9NDN/H/pI4="
+ 
+  responses:
+    BadRequest:
+      description: "요청 형식 오류"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    NotFound:
+      description: "리소스가 없음"
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/Problem"
+    CallbackAccepted:
+      description: "수신 확인. 본문은 보지 않는다. 2xx가 아니면 재시도한다."
+ 
+  schemas:
+    # ---------------------------------------------------------------- 공통
+    JobStatus:
+      type: string
+      enum: [queued, running, succeeded, failed, canceled]
+    Problem:
+      type: object
+      description: "RFC 9457 Problem Details"
+      properties:
+        type:
+          type: string
+          example: "https://mrx.internal/problems/not-found"
+        title:
+          type: string
+          example: "리소스가 없음"
+        status:
+          type: integer
+          example: 404
+        detail:
+          type: string
+          example: "training 'trn_01HZX3K9' not found"
+        instance:
+          type: string
+          example: "/v1/trainings/trn_01HZX3K9"
+    CallbackEnvelope:
+      type: object
+      description: "모든 Callback 본문의 공통 봉투"
+      required: [id, type, source, time]
+      properties:
+        id:
+          type: string
+          description: "Callback 고유 ID. 재시도해도 같은 값"
+          example: "evt_01HZY7QW"
+        type:
+          type: string
+          enum: [image.stored, label.created, dataset.completed, training.progress, training.completed]
+        source:
+          type: string
+          description: "Callback이 가리키는 리소스"
+          example: "/v1/trainings/trn_01HZX3K9"
+        time:
+          type: string
+          format: date-time
+          description: "이벤트 발생 시각"
+          example: "2026-10-30T10:46:00+09:00"
+    BBoxLabel:
+      type: object
+      required: [class_id, class_name, confidence, bbox_xyxy, bbox_xywhn]
+      properties:
+        class_id:
+          type: integer
+          example: 0
+        class_name:
+          type: string
+          example: "scratch"
+        confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          example: 0.9312
+        bbox_xyxy:
+          type: array
+          description: "픽셀 좌표 [x1, y1, x2, y2]"
+          items:
+            type: number
+          minItems: 4
+          maxItems: 4
+          example: [120.5, 88.0, 240.25, 190.75]
+        bbox_xywhn:
+          type: array
+          description: "정규화 좌표 [중심 x, 중심 y, 너비, 높이] (YOLO 형식)"
+          items:
+            type: number
+          minItems: 4
+          maxItems: 4
+          example: [0.1758, 0.2154, 0.1121, 0.1597]
+ 
+    # ---------------------------------------------------------------- #1, #2
+    ImageStoredData:
+      type: object
+      required: [image_id, status]
+      properties:
+        image_id:
+          type: string
+          example: "img_20261030_000123"
+        file_name:
+          type: string
+          example: "LINE3_CAM2_20261030_104512.png"
+        status:
+          type: string
+          enum: [succeeded, failed]
+          description: "저장 · 이관 결과"
+        nas_path:
+          type: [string, "null"]
+          description: "NAS에 저장된 경로. 실패하면 null"
+          example: "/nas/mrx/images/2026/10/30/LINE3_CAM2_20261030_104512.png"
+        size_bytes:
+          type: integer
+          example: 2483120
+        sha256:
+          type: string
+          description: "원본 파일 체크섬"
+          example: "9f2c1b0e4a7d3e58c6b1f0a2d9e4c7b8a1f3e5d7c9b2a4f6e8d0c2b4a6f8e0d2"
+        stored_at:
+          type: string
+          format: date-time
+        error:
+          oneOf:
+          - $ref: "#/components/schemas/Problem"
+          - type: "null"
+          description: "실패 원인. 성공하면 null"
+    LabelCreatedData:
+      type: object
+      required: [image_id, model, width, height, labels]
+      properties:
+        image_id:
+          type: string
+          example: "img_20261030_000123"
+        nas_path:
+          type: string
+          example: "/nas/mrx/images/2026/10/30/LINE3_CAM2_20261030_104512.png"
+        model:
+          type: object
+          description: "라벨링에 쓴 모델"
+          properties:
+            name:
+              type: string
+              example: "defect-detector"
+            version:
+              type: integer
+              example: 3
+        width:
+          type: integer
+          example: 2048
+        height:
+          type: integer
+          example: 1536
+        labels:
+          type: array
+          description: "검출된 박스. 없으면 빈 배열"
+          items:
+            $ref: "#/components/schemas/BBoxLabel"
+        labeled_at:
+          type: string
+          format: date-time
+ 
+    # ---------------------------------------------------------------- #3, #4
+    Split:
+      type: object
+      description: "학습 · 검증 분할 비율. 합이 1이어야 한다."
+      properties:
+        train:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.8
+        val:
+          type: number
+          minimum: 0
+          maximum: 1
+          default: 0.2
+    DatasetCreate:
+      type: object
+      required: [images, min_confidence]
+      properties:
+        images:
+          type: object
+          description: "데이터셋에 넣을 이미지. `image_ids`나 `labeled_from`·`labeled_to` 중 하나로 지정한다."
+          properties:
+            image_ids:
+              type: array
+              items:
+                type: string
+              example: ["img_20261030_000123", "img_20261030_000124"]
+            labeled_from:
+              type: string
+              format: date-time
+              description: "이 시각 이후에 라벨링된 이미지"
+              example: "2026-10-23T00:00:00+09:00"
+            labeled_to:
+              type: string
+              format: date-time
+              description: "이 시각 이전에 라벨링된 이미지"
+              example: "2026-10-30T00:00:00+09:00"
+        min_confidence:
+          type: number
+          minimum: 0
+          maximum: 1
+          description: "이 값 이상인 라벨만 사용"
+          example: 0.9
+        split:
+          $ref: "#/components/schemas/Split"
+        base_dataset_id:
+          type: string
+          description: "이 데이터셋에 더해서 만들 때만 지정"
+          example: "ds_01HZW0Z9"
+        idempotency_key:
+          type: string
+          maxLength: 128
+          description: "같은 키로 다시 요청하면 새로 만들지 않고 기존 작업을 돌려준다"
+    Dataset:
+      type: object
+      required: [dataset_id, status, created_at]
+      properties:
+        dataset_id:
+          type: string
+          example: "ds_01HZX1A2"
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        min_confidence:
+          type: number
+          example: 0.9
+        split:
+          $ref: "#/components/schemas/Split"
+        base_dataset_id:
+          type: [string, "null"]
+        num_images:
+          type: object
+          description: "분할별 이미지 수. 완료 후에 채워진다."
+          properties:
+            train:
+              type: integer
+              example: 3800
+            val:
+              type: integer
+              example: 950
+        num_excluded_labels:
+          type: integer
+          description: "신뢰도 기준 미만이라 제외된 라벨 수"
+          example: 2410
+        class_counts:
+          type: object
+          additionalProperties:
+            type: integer
+          example:
+            scratch: 8120
+            dent: 3302
+        storage_path:
+          type: [string, "null"]
+          description: "구성된 데이터셋 위치"
+          example: "/nas/mrx/datasets/ds_01HZX1A2"
+        error:
+          oneOf:
+          - $ref: "#/components/schemas/Problem"
+          - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+ 
+    # ---------------------------------------------------------------- #5 ~ #9
+    TrainingCreate:
+      type: object
+      required: [dataset_id, config]
+      properties:
+        dataset_id:
+          type: string
+          description: "학습에 쓸 데이터셋 (구성 완료 상태)"
+          example: "ds_01HZX1A2"
+        eval_dataset_id:
+          type: string
+          description: "평가에 쓸 고정 데이터셋. 없으면 `dataset_id`의 검증 분할로 평가"
+          example: "ds_eval_golden_v1"
+        base_model:
+          type: object
+          description: "이어서 학습할 Registry 모델. 없으면 처음부터 학습"
+          properties:
+            name:
+              type: string
+              example: "defect-detector"
+            version:
+              type: integer
+              example: 3
+        config:
+          type: object
+          required: [model_arch, epochs]
+          properties:
+            model_arch:
+              type: string
+              example: "yolo11m"
+            epochs:
+              type: integer
+              minimum: 1
+              example: 100
+            batch_size:
+              type: integer
+              minimum: 1
+              default: 16
+            learning_rate:
+              type: number
+              default: 0.001
+            image_size:
+              type: integer
+              default: 640
+        resources:
+          type: object
+          properties:
+            gpu_count:
+              type: integer
+              minimum: 1
+              default: 1
+        idempotency_key:
+          type: string
+          maxLength: 128
+    Progress:
+      type: object
+      properties:
+        epoch:
+          type: integer
+          description: "끝난 epoch 수"
+          example: 37
+        total_epochs:
+          type: integer
+          example: 100
+        percent:
+          type: number
+          example: 37.0
+        phase:
+          type: string
+          enum: [preparing, training, evaluating, registering]
+          description: "현재 단계"
+          example: "training"
+        eta_seconds:
+          type: [integer, "null"]
+          description: "예상 남은 시간"
+          example: 5400
+    Training:
+      type: object
+      required: [training_id, dataset_id, status, created_at]
+      properties:
+        training_id:
+          type: string
+          example: "trn_01HZX3K9"
+        dataset_id:
+          type: string
+          example: "ds_01HZX1A2"
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        progress:
+          $ref: "#/components/schemas/Progress"
+        last_reported_at:
+          type: [string, "null"]
+          format: date-time
+          description: "마지막으로 `training.progress`를 보낸 시각"
+        error:
+          oneOf:
+          - $ref: "#/components/schemas/Problem"
+          - type: "null"
+        created_at:
+          type: string
+          format: date-time
+        started_at:
+          type: [string, "null"]
+          format: date-time
+        finished_at:
+          type: [string, "null"]
+          format: date-time
+    TrainingProgressData:
+      type: object
+      required: [training_id, sequence, status, progress]
+      properties:
+        training_id:
+          type: string
+          example: "trn_01HZX3K9"
+        sequence:
+          type: integer
+          description: "학습마다 1부터 1씩 늘어나는 보고 번호. 더 작은 번호가 늦게 오면 무시한다."
+          example: 42
+        status:
+          $ref: "#/components/schemas/JobStatus"
+          example: "running"
+        progress:
+          $ref: "#/components/schemas/Progress"
+        metrics:
+          type: object
+          description: "마지막으로 끝난 epoch의 지표"
+          additionalProperties:
+            type: number
+          example:
+            train/box_loss: 0.912
+            val/mAP50: 0.684
+    RegistryInfo:
+      type: object
+      description: "Registry 등록 정보"
+      required: [name, version, uri]
+      properties:
+        name:
+          type: string
+          example: "defect-detector"
+        version:
+          type: integer
+          example: 4
+        uri:
+          type: string
+          description: "모델 가중치 위치"
+          example: "/nas/mrx/registry/defect-detector/4/best.pt"
+        stage:
+          type: string
+          enum: [candidate, approved]
+          description: "등록 직후에는 candidate"
+          example: "candidate"
+        registered_at:
+          type: string
+          format: date-time
+    TrainingResult:
+      type: object
+      required: [training_id, status]
+      properties:
+        training_id:
+          type: string
+          example: "trn_01HZX3K9"
+        status:
+          type: string
+          enum: [succeeded, failed, canceled]
+        evaluation:
+          type: [object, "null"]
+          description: "평가 결과. 성공했을 때만 있음"
+          properties:
+            eval_dataset_id:
+              type: string
+              example: "ds_eval_golden_v1"
+            metrics:
+              type: object
+              additionalProperties:
+                type: number
+              example:
+                mAP50: 0.742
+                mAP50-95: 0.531
+                precision: 0.801
+                recall: 0.688
+            per_class:
+              type: object
+              description: "클래스별 지표"
+              additionalProperties:
+                type: object
+                additionalProperties:
+                  type: number
+              example:
+                scratch:
+                  mAP50: 0.781
+                dent:
+                  mAP50: 0.702
+        registry:
+          oneOf:
+          - $ref: "#/components/schemas/RegistryInfo"
+          - type: "null"
+          description: "Registry 등록 정보. 성공했을 때만 있음"
+        error:
+          oneOf:
+          - $ref: "#/components/schemas/Problem"
+          - type: "null"
+        finished_at:
+          type: string
+          format: date-time
