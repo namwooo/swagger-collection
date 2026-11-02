@@ -32,9 +32,13 @@ paths:
       - "init-trainings"
       summary: "초도 모델 학습"
       description: |
-        학습된 모델이 없는 상태에서, 사람이 라벨링한 이미지와 라벨로 첫 모델을 학습한다.
-        학습 가능한 기존 모델이 있으면 이 API 대신 `/registry/models`에 등록된 모델을 쓸 수 있다.
-        학습이 끝난 모델은 `POST /registry/models`에 `type: init`으로 등록한다.
+        공정 모델이 아직 없는 라인에서, 사람이 라벨링한 이미지와 라벨로 첫 공정 모델을 학습한다.
+
+        1. 시작점이 될 모델을 `POST /registry/models`에 `type: init`으로 먼저 등록한다.
+        2. 그 `model_id`로 이 API를 호출한다.
+        3. 학습이 끝나면 결과를 `POST /registry/models`에 `type: line`과 `init_training_id`로 등록한다.
+
+        이후 재학습은 이 공정 모델을 `base_model_id`로 해서 `POST /trainings`를 쓴다.
       operationId: "createInitTraining"
       parameters:
       - in: "body"
@@ -50,7 +54,11 @@ paths:
         "400":
           $ref: "#/responses/BadRequest"
         "404":
-          description: "`image_path` · `label_path` 또는 `model_id`가 없음"
+          description: "`model_id`, `image_path`, `label_path` 중 없는 것이 있음"
+          schema:
+            $ref: "#/definitions/Problem"
+        "409":
+          description: "`model_id`가 `type: init` 모델이 아님"
           schema:
             $ref: "#/definitions/Problem"
   /init-trainings/{init_training_id}:
@@ -496,9 +504,9 @@ paths:
       - "models"
       summary: "모델 등록"
       description: |
-        학습이 끝난 모델을 Registry에 등록한다. `type`으로 공정 모델과 초도 모델을 구분한다.
-        - `line`: 공정 모델. `training_id` 필수
-        - `init`: 초도 모델. `init_training_id` 필수
+        모델을 Registry에 등록한다. `type`으로 초도 모델과 공정 모델을 구분한다.
+        - `init`: 초도 학습의 시작점이 되는 모델 (예: 사전학습 모델). 학습 전에 등록한다. `weights_path` 필수
+        - `line`: 학습 결과로 나온 공정 모델. 초도 학습 결과면 `init_training_id`, 재학습 결과면 `training_id` 중 하나 필수
       operationId: "createModel"
       parameters:
       - in: "body"
@@ -514,7 +522,7 @@ paths:
         "400":
           $ref: "#/responses/BadRequest"
         "404":
-          description: "지정한 학습 또는 초도 학습이 없음"
+          description: "지정한 학습, 초도 학습 또는 `weights_path` 파일이 없음"
           schema:
             $ref: "#/definitions/Problem"
         "409":
@@ -844,13 +852,14 @@ definitions:
   InitTrainingCreate:
     type: "object"
     required:
+    - "model_id"
     - "image_path"
     - "label_path"
     properties:
       model_id:
         type: "string"
-        description: "초도 학습을 시작할 기반 모델 (예: 사전학습 모델). 생략하면 기본 사전학습 모델을 쓴다"
-        example: "pretrained-yolo11m"
+        description: "학습을 시작할 모델. Registry에 `type: init`으로 등록된 모델이어야 한다"
+        example: "mdl_01HZT0P7"
       image_path:
         type: "string"
         description: "학습 이미지 위치"
@@ -868,6 +877,7 @@ definitions:
     - type: "object"
       required:
       - "init_training_id"
+      - "model_id"
       - "image_path"
       - "label_path"
       - "status"
@@ -878,7 +888,8 @@ definitions:
           example: "itr_01HZV8K2"
         model_id:
           type: "string"
-          example: "pretrained-yolo11m"
+          description: "시작점으로 쓴 `type: init` 모델"
+          example: "mdl_01HZT0P7"
         image_path:
           type: "string"
           example: "/data/init/LINE3/images"
@@ -1438,7 +1449,7 @@ definitions:
   # ------------------------------------------------------------------ models
   ModelType:
     type: "string"
-    description: "line = 공정 모델, init = 초도 모델"
+    description: "init = 초도 학습의 시작점 모델, line = 학습 결과로 나온 공정 모델"
     enum:
     - "line"
     - "init"
@@ -1448,7 +1459,6 @@ definitions:
     - "model_name"
     - "model_version"
     - "task"
-    - "line"
     properties:
       model_name:
         type: "string"
@@ -1462,6 +1472,7 @@ definitions:
         example: "detection"
       line:
         type: "string"
+        description: "`type: line`이면 필수. `init` 모델은 특정 라인에 속하지 않으면 생략"
         example: "LINE3"
   ModelCreate:
     type: "object"
@@ -1473,14 +1484,18 @@ definitions:
         $ref: "#/definitions/ModelType"
       metadata:
         $ref: "#/definitions/ModelMetadata"
-      training_id:
+      weights_path:
         type: "string"
-        description: "`type: line`일 때 필수. 모델로 등록할 학습 (succeeded 상태여야 함)"
-        example: "trn_01HZX3K9"
+        description: "`type: init`일 때 필수. 등록할 모델 가중치 파일 위치"
+        example: "/data/pretrained/yolo11m.pt"
       init_training_id:
         type: "string"
-        description: "`type: init`일 때 필수. 모델로 등록할 초도 학습 (succeeded 상태여야 함)"
+        description: "`type: line`이고 초도 학습 결과일 때. 모델로 등록할 초도 학습 (succeeded 상태여야 함)"
         example: "itr_01HZV8K2"
+      training_id:
+        type: "string"
+        description: "`type: line`이고 재학습 결과일 때. 모델로 등록할 학습 (succeeded 상태여야 함)"
+        example: "trn_01HZX3K9"
   ModelApply:
     type: "object"
     properties:
@@ -1544,11 +1559,11 @@ definitions:
         $ref: "#/definitions/ModelMetadata"
       training_id:
         type: "string"
-        description: "출처 학습 (`type: line`)"
+        description: "출처 재학습 (`type: line`, 재학습 결과일 때)"
         example: "trn_01HZX3K9"
       init_training_id:
         type: "string"
-        description: "출처 초도 학습 (`type: init`)"
+        description: "출처 초도 학습 (`type: line`, 첫 공정 모델일 때)"
       dataset_id:
         type: "string"
         description: "출처 데이터셋"
