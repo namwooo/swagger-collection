@@ -31,14 +31,6 @@ paths:
       tags:
       - "init-trainings"
       summary: "초도 모델 학습"
-      description: |
-        공정 모델이 아직 없는 라인에서, 사람이 라벨링한 이미지와 라벨로 첫 공정 모델을 학습한다.
-
-        1. 시작점이 될 모델을 `POST /registry/models`에 `type: init`으로 먼저 등록한다.
-        2. 그 `model_id`로 이 API를 호출한다.
-        3. 학습이 끝나면 결과를 `POST /registry/models`에 `type: line`과 `init_training_id`로 등록한다.
-
-        이후 재학습은 이 공정 모델을 `base_model_id`로 해서 `POST /trainings`를 쓴다.
       operationId: "createInitTraining"
       parameters:
       - in: "body"
@@ -83,7 +75,6 @@ paths:
       tags:
       - "labelings"
       summary: "자동 라벨링 실행"
-      description: "원천 데이터에 자동 라벨링을 시작한다. `model_id`를 생략하면 현재 적용된 모델(`POST /registry/models/{model_id}/apply`)을 쓴다."
       operationId: "createLabeling"
       parameters:
       - in: "body"
@@ -99,14 +90,13 @@ paths:
         "400":
           $ref: "#/responses/BadRequest"
         "404":
-          description: "`model_id`가 없거나, 생략했는데 적용된 모델이 없음"
+          description: "`model_id`에 해당하는 모델이 없음"
           schema:
             $ref: "#/definitions/Problem"
     get:
       tags:
       - "labelings"
       summary: "라벨링 목록 조회"
-      description: "최근에 등록한 것부터 보여준다."
       operationId: "listLabelings"
       parameters:
       - $ref: "#/parameters/status"
@@ -124,7 +114,6 @@ paths:
       tags:
       - "labelings"
       summary: "라벨링 작업 상태 조회"
-      description: "진행률, 상태, 결과 요약을 조회한다."
       operationId: "getLabeling"
       parameters:
       - $ref: "#/parameters/labeling_id"
@@ -140,7 +129,6 @@ paths:
       tags:
       - "labelings"
       summary: "라벨링 이미지 목록 조회"
-      description: "라벨링 대상 이미지 목록과 이미지별 라벨 수, 모델 판정과 사람 판정을 조회한다."
       operationId: "listLabelingImages"
       parameters:
       - $ref: "#/parameters/labeling_id"
@@ -189,7 +177,6 @@ paths:
       tags:
       - "labelings"
       summary: "라벨링 결과 조회"
-      description: "이미지별 자동 라벨링 결과를 조회한다. 라벨링이 끝나기 전에는 처리된 이미지까지만 나온다."
       operationId: "listLabelingResults"
       parameters:
       - $ref: "#/parameters/labeling_id"
@@ -216,7 +203,6 @@ paths:
       tags:
       - "labelings"
       summary: "라벨링 결과 개별 조회"
-      description: "이미지 한 장의 자동 라벨링 결과와 모델 판정, 사람 판정을 조회한다."
       operationId: "getLabelingResult"
       parameters:
       - $ref: "#/parameters/labeling_id"
@@ -233,10 +219,6 @@ paths:
       tags:
       - "labelings"
       summary: "리뷰 라벨링 결과 생성"
-      description: |
-        사람이 검수한 이미지별 판정(`OK` / `MODIFY` / `DISCARD`)을 등록한다. 등록한 값은 `review.result`에 들어간다.
-        모델 판정(`review.suggested`)은 라벨링 작업이 채우며 이 API로 바꿀 수 없다.
-        이미 사람 판정이 있는 이미지가 포함되면 409로 거절한다. 판정을 바꿀 때는 `PUT`을 쓴다.
       operationId: "createReviewedImages"
       parameters:
       - $ref: "#/parameters/labeling_id"
@@ -264,9 +246,6 @@ paths:
       tags:
       - "labelings"
       summary: "리뷰 라벨링 결과 벌크 업데이트"
-      description: |
-        보낸 이미지들의 사람 판정(`review.result`)을 한꺼번에 바꾼다. 사람 판정이 없던 이미지는 새로 등록된다.
-        보내지 않은 이미지의 판정은 그대로 둔다. 모델 판정(`review.suggested`)은 바뀌지 않는다.
       operationId: "updateReviewedImages"
       parameters:
       - $ref: "#/parameters/labeling_id"
@@ -297,7 +276,6 @@ paths:
       tags:
       - "datasets"
       summary: "데이터셋 생성"
-      description: "라벨링 결과로 데이터셋을 구성한다. 한 번 만든 데이터셋은 수정하지 않는다."
       operationId: "createDataset"
       parameters:
       - in: "body"
@@ -324,7 +302,6 @@ paths:
       tags:
       - "datasets"
       summary: "데이터셋 목록 조회"
-      description: "메타데이터(모델, 라인, 태스크)와 상태로 거를 수 있다."
       operationId: "listDatasets"
       parameters:
       - name: "model_id"
@@ -357,7 +334,6 @@ paths:
       tags:
       - "datasets"
       summary: "데이터셋 상세 조회"
-      description: "메타데이터, 분할별 이미지 수, 클래스 분포, 출처 라벨링을 조회한다."
       operationId: "getDataset"
       parameters:
       - $ref: "#/parameters/dataset_id"
@@ -375,7 +351,6 @@ paths:
       tags:
       - "trainings"
       summary: "학습 실행"
-      description: "데이터셋으로 학습을 시작한다. 학습이 끝나면 `POST /registry/models`에 `type: line`으로 등록한다."
       operationId: "createTraining"
       parameters:
       - in: "body"
@@ -424,7 +399,6 @@ paths:
       tags:
       - "trainings"
       summary: "학습 상태 조회"
-      description: "진행률과 상태를 조회한다."
       operationId: "getTraining"
       parameters:
       - $ref: "#/parameters/training_id"
@@ -440,16 +414,9 @@ paths:
       tags:
       - "trainings"
       summary: "학습 지표 조회"
-      description: "epoch별 지표 이력을 조회한다. 진행 중에도 조회할 수 있다."
       operationId: "listTrainingMetrics"
       parameters:
       - $ref: "#/parameters/training_id"
-      - name: "since_step"
-        in: "query"
-        description: "이 step 이후의 지표만 조회"
-        required: false
-        type: "integer"
-        minimum: 0
       responses:
         "200":
           description: "지표 이력"
@@ -464,7 +431,6 @@ paths:
       tags:
       - "trainings"
       summary: "학습 결과 조회"
-      description: "학습 종료 후 최종 평가 결과를 조회한다."
       operationId: "getTrainingResult"
       parameters:
       - $ref: "#/parameters/training_id"
@@ -484,7 +450,6 @@ paths:
       tags:
       - "trainings"
       summary: "학습 로그 조회"
-      description: "학습 로그를 조회한다. `follow=true`면 연결을 유지하며 새 로그를 이어서 보낸다."
       operationId: "getTrainingLogs"
       produces:
       - "text/plain"
@@ -496,12 +461,6 @@ paths:
         required: false
         type: "integer"
         minimum: 1
-      - name: "follow"
-        in: "query"
-        description: "새 로그를 계속 이어서 받을지 여부"
-        required: false
-        type: "boolean"
-        default: false
       responses:
         "200":
           description: "로그 (한 줄에 한 항목)"
@@ -514,7 +473,6 @@ paths:
       tags:
       - "trainings"
       summary: "학습 중단"
-      description: "대기 중이거나 진행 중인 학습을 중단하고 GPU를 반환한다."
       operationId: "cancelTraining"
       parameters:
       - $ref: "#/parameters/training_id"
@@ -534,10 +492,6 @@ paths:
       tags:
       - "models"
       summary: "모델 등록"
-      description: |
-        모델을 Registry에 등록한다. `type`으로 초도 모델과 공정 모델을 구분한다.
-        - `init`: 초도 학습의 시작점이 되는 모델 (예: 사전학습 모델). 학습 전에 등록한다. `weights_path` 필수
-        - `line`: 학습 결과로 나온 공정 모델. 초도 학습 결과면 `init_training_id`, 재학습 결과면 `training_id` 중 하나 필수
       operationId: "createModel"
       parameters:
       - in: "body"
@@ -605,7 +559,6 @@ paths:
       tags:
       - "models"
       summary: "모델 상세 조회"
-      description: "메타데이터, 출처 학습, 평가 지표, 적용 여부, 추출 이력을 조회한다."
       operationId: "getModel"
       parameters:
       - $ref: "#/parameters/model_id"
@@ -621,9 +574,6 @@ paths:
       tags:
       - "models"
       summary: "모델 적용"
-      description: |
-        모델을 해당 라인 · 태스크의 현재 모델로 적용한다. 같은 라인 · 태스크에 적용돼 있던 모델은 해제된다.
-        적용된 모델은 `model_id`를 생략한 자동 라벨링에 쓰인다.
       operationId: "applyModel"
       parameters:
       - $ref: "#/parameters/model_id"
@@ -644,9 +594,6 @@ paths:
       tags:
       - "models"
       summary: "모델 추출"
-      description: |
-        모델을 지정한 형식으로 변환해 파일로 내보낸다. 변환에 시간이 걸릴 수 있어 비동기로 처리한다.
-        진행 상태와 파일 경로는 모델 상세 조회의 `exports`에서 확인한다.
       operationId: "exportModel"
       parameters:
       - $ref: "#/parameters/model_id"
@@ -975,11 +922,12 @@ definitions:
   LabelingCreate:
     type: "object"
     required:
+    - "model_id"
     - "source_path"
     properties:
       model_id:
         type: "string"
-        description: "라벨링에 쓸 모델. 생략하면 현재 적용된 모델"
+        description: "라벨링에 쓸 모델"
         example: "mdl_01HZY2C4"
       source_path:
         type: "string"
@@ -1040,7 +988,7 @@ definitions:
           example: "lbl_01HZW9P3"
         model_id:
           type: "string"
-          description: "실제로 쓴 모델 (생략했으면 그때 적용돼 있던 모델)"
+          description: "라벨링에 쓴 모델"
           example: "mdl_01HZY2C4"
         source_path:
           type: "string"
@@ -1421,9 +1369,6 @@ definitions:
   MetricPoint:
     type: "object"
     properties:
-      step:
-        type: "integer"
-        example: 1200
       epoch:
         type: "integer"
         example: 12
