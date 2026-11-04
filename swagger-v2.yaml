@@ -279,6 +279,14 @@ paths:
       tags:
       - "trainings"
       summary: "학습 실행"
+      description: |
+        지정한 라벨링의 이미지를 합쳐 학습한다.
+        - `OK`와 사람 판정 없는 `approved` 이미지는 자동 라벨을 쓴다
+        - `MODIFY` 이미지는 사람이 고친 라벨을 쓴다
+        - `DISCARD`와 검수 전 `review` 이미지는 제외한다
+        - 같은 이미지가 여러 라벨링에 있으면 가장 최근 라벨링의 결과를 쓴다
+        - train · val · test는 이미지 경로의 해시로 나눈다. `split`이 같으면 같은 이미지는 항상 같은 분할에 들어간다
+        - `split.test`를 유지하면 `train`과 `val` 비율을 바꿔도 시험 이미지는 그대로다
       operationId: "createTraining"
       parameters:
       - in: "body"
@@ -298,7 +306,7 @@ paths:
           schema:
             $ref: "#/definitions/Problem"
         "409":
-          description: "라벨링이 아직 끝나지 않음"
+          description: "끝나지 않은 라벨링이 있거나, 라벨링끼리 클래스 구성이 다르거나, 학습에 쓸 이미지가 없음"
           schema:
             $ref: "#/definitions/Problem"
     get:
@@ -1157,7 +1165,7 @@ definitions:
   # ------------------------------------------------------------------ trainings
   Split:
     type: "object"
-    description: "학습 · 검증 · 시험 분할 비율. 합이 1이어야 한다."
+    description: "학습 · 검증 · 시험 분할 비율. 합이 1이어야 하고, `train`과 `val`은 0보다 커야 한다. 생략한 항목은 기본값을 쓴다."
     properties:
       train:
         type: "number"
@@ -1186,22 +1194,6 @@ definitions:
         items:
           type: "integer"
         example: [1]
-      label_source:
-        type: "string"
-        enum:
-        - "reviewed"
-        - "auto"
-        default: "reviewed"
-        description: |
-          어떤 라벨을 쓸지.
-          - `reviewed`: `OK`와 사람 판정 없는 `approved` 이미지는 자동 라벨, `MODIFY`는 고친 라벨을 사용. `DISCARD`와 검수 전 `review` 이미지는 제외
-          - `auto`: 자동 라벨 중 `min_confidence` 이상만 사용
-      min_confidence:
-        type: "number"
-        minimum: 0
-        maximum: 1
-        description: "`label_source: auto`일 때 필수. 이 값 이상인 라벨만 사용"
-        example: 0.9
       split:
         $ref: "#/definitions/Split"
       base_model_id:
@@ -1229,13 +1221,6 @@ definitions:
           items:
             type: "integer"
           example: [1]
-        label_source:
-          type: "string"
-          enum:
-          - "reviewed"
-          - "auto"
-        min_confidence:
-          type: "number"
         split:
           $ref: "#/definitions/Split"
         base_model_id:
