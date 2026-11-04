@@ -2,7 +2,7 @@
 swagger: "2.0"
 info:
   title: "MRX API"
-  version: "0.2.0"
+  version: "0.3.0"
   description: |
     마키나락스 비전 OPs API.
 basePath: "/v1"
@@ -17,8 +17,6 @@ tags:
   description: "초도 모델 학습"
 - name: "labelings"
   description: "자동 라벨링과 리뷰"
-- name: "datasets"
-  description: "학습용 데이터셋 구성"
 - name: "trainings"
   description: "학습 실행과 모니터링"
 - name: "models"
@@ -90,7 +88,11 @@ paths:
         "400":
           $ref: "#/responses/BadRequest"
         "404":
-          description: "`model_id`에 해당하는 모델이 없음"
+          description: "`model_id`에 해당하는 모델 또는 `source_path`가 없음"
+          schema:
+            $ref: "#/definitions/Problem"
+        "409":
+          description: "`model_id`가 `type: line` 모델이 아님"
           schema:
             $ref: "#/definitions/Problem"
     get:
@@ -139,15 +141,14 @@ paths:
         type: "boolean"
       - name: "suggested"
         in: "query"
-        description: "모델 판정이 이 값인 이미지만. 여러 개 줄 수 있음 (`?suggested=MODIFY&suggested=DISCARD`)"
+        description: "시스템 판정이 이 값인 이미지만"
         required: false
         type: "array"
         items:
           type: "string"
           enum:
-          - "OK"
-          - "MODIFY"
-          - "DISCARD"
+          - "approved"
+          - "review"
         collectionFormat: "multi"
       - name: "result"
         in: "query"
@@ -214,24 +215,25 @@ paths:
             $ref: "#/definitions/ImageLabelResult"
         "404":
           $ref: "#/responses/NotFound"
-  /labelings/{labeling_id}/reviewed:
+  /labelings/{labeling_id}/review:
     post:
       tags:
       - "labelings"
-      summary: "리뷰 라벨링 결과 생성"
-      operationId: "createReviewedImages"
+      summary: "리뷰 판정 등록"
+      description: "처음 판정을 등록한다. 이미 사람 판정이 있는 이미지가 하나라도 있으면 전체를 거절한다"
+      operationId: "createReview"
       parameters:
       - $ref: "#/parameters/labeling_id"
       - in: "body"
         name: "body"
         required: true
         schema:
-          $ref: "#/definitions/ReviewedImagesRequest"
+          $ref: "#/definitions/ReviewRequest"
       responses:
         "201":
           description: "저장됨"
           schema:
-            $ref: "#/definitions/ReviewedImagesResponse"
+            $ref: "#/definitions/ReviewResponse"
         "400":
           $ref: "#/responses/BadRequest"
         "404":
@@ -245,20 +247,21 @@ paths:
     put:
       tags:
       - "labelings"
-      summary: "리뷰 라벨링 결과 벌크 업데이트"
-      operationId: "updateReviewedImages"
+      summary: "리뷰 판정 등록·변경"
+      description: "판정을 덮어쓴다. 아직 판정이 없는 이미지는 새로 등록한다"
+      operationId: "updateReview"
       parameters:
       - $ref: "#/parameters/labeling_id"
       - in: "body"
         name: "body"
         required: true
         schema:
-          $ref: "#/definitions/ReviewedImagesRequest"
+          $ref: "#/definitions/ReviewRequest"
       responses:
         "200":
-          description: "변경됨"
+          description: "등록 또는 변경됨"
           schema:
-            $ref: "#/definitions/ReviewedImagesResponse"
+            $ref: "#/definitions/ReviewResponse"
         "400":
           $ref: "#/responses/BadRequest"
         "404":
@@ -269,81 +272,6 @@ paths:
           description: "라벨링이 아직 끝나지 않음"
           schema:
             $ref: "#/definitions/Problem"
-
-  # ------------------------------------------------------------------ datasets
-  /datasets:
-    post:
-      tags:
-      - "datasets"
-      summary: "데이터셋 생성"
-      operationId: "createDataset"
-      parameters:
-      - in: "body"
-        name: "body"
-        required: true
-        schema:
-          $ref: "#/definitions/DatasetCreate"
-      responses:
-        "202":
-          description: "접수됨. 상태는 `queued`."
-          schema:
-            $ref: "#/definitions/Dataset"
-        "400":
-          $ref: "#/responses/BadRequest"
-        "404":
-          description: "지정한 라벨링 또는 기준 데이터셋이 없음"
-          schema:
-            $ref: "#/definitions/Problem"
-        "409":
-          description: "라벨링이 아직 끝나지 않음"
-          schema:
-            $ref: "#/definitions/Problem"
-    get:
-      tags:
-      - "datasets"
-      summary: "데이터셋 목록 조회"
-      operationId: "listDatasets"
-      parameters:
-      - name: "model_id"
-        in: "query"
-        description: "이 모델용 데이터셋만"
-        required: false
-        type: "string"
-      - name: "line"
-        in: "query"
-        description: "이 라인의 데이터셋만"
-        required: false
-        type: "string"
-      - name: "task"
-        in: "query"
-        description: "이 태스크의 데이터셋만"
-        required: false
-        type: "string"
-      - $ref: "#/parameters/status"
-      - $ref: "#/parameters/limit"
-      - $ref: "#/parameters/offset"
-      responses:
-        "200":
-          description: "데이터셋 목록"
-          schema:
-            type: "array"
-            items:
-              $ref: "#/definitions/Dataset"
-  /datasets/{dataset_id}:
-    get:
-      tags:
-      - "datasets"
-      summary: "데이터셋 상세 조회"
-      operationId: "getDataset"
-      parameters:
-      - $ref: "#/parameters/dataset_id"
-      responses:
-        "200":
-          description: "데이터셋"
-          schema:
-            $ref: "#/definitions/Dataset"
-        "404":
-          $ref: "#/responses/NotFound"
 
   # ------------------------------------------------------------------ trainings
   /trainings:
@@ -366,11 +294,11 @@ paths:
         "400":
           $ref: "#/responses/BadRequest"
         "404":
-          description: "데이터셋 또는 기준 모델이 없음"
+          description: "라벨링 또는 기준 모델이 없음"
           schema:
             $ref: "#/definitions/Problem"
         "409":
-          description: "데이터셋 구성이 끝나지 않음"
+          description: "라벨링이 아직 끝나지 않음"
           schema:
             $ref: "#/definitions/Problem"
     get:
@@ -379,11 +307,11 @@ paths:
       summary: "학습 목록 조회"
       operationId: "listTrainings"
       parameters:
-      - name: "dataset_id"
+      - name: "labeling_id"
         in: "query"
-        description: "이 데이터셋으로 실행한 학습만"
+        description: "이 라벨링을 학습 데이터로 쓴 학습만"
         required: false
-        type: "string"
+        type: "integer"
       - $ref: "#/parameters/status"
       - $ref: "#/parameters/limit"
       - $ref: "#/parameters/offset"
@@ -511,7 +439,7 @@ paths:
           schema:
             $ref: "#/definitions/Problem"
         "409":
-          description: "학습이 성공하지 않았거나, 같은 `model_name` · `model_version`이 이미 있음"
+          description: "학습이 성공하지 않았거나, 같은 `model_name` · `model_version`이 이미 있거나, 이미 모델로 등록된 학습이거나, `task`가 시작 모델과 다름"
           schema:
             $ref: "#/definitions/Problem"
     get:
@@ -617,37 +545,31 @@ parameters:
     name: "init_training_id"
     in: "path"
     required: true
-    type: "string"
+    type: "integer"
     description: "초도 학습 ID"
   labeling_id:
     name: "labeling_id"
     in: "path"
     required: true
-    type: "string"
+    type: "integer"
     description: "라벨링 ID"
   image_id:
     name: "image_id"
     in: "path"
     required: true
-    type: "string"
+    type: "integer"
     description: "이미지 ID"
-  dataset_id:
-    name: "dataset_id"
-    in: "path"
-    required: true
-    type: "string"
-    description: "데이터셋 ID"
   training_id:
     name: "training_id"
     in: "path"
     required: true
-    type: "string"
+    type: "integer"
     description: "학습 ID"
   model_id:
     name: "model_id"
     in: "path"
     required: true
-    type: "string"
+    type: "integer"
     description: "모델 ID"
   status:
     name: "status"
@@ -702,7 +624,7 @@ responses:
         type: "https://mrx.internal/problems/not-found"
         title: "리소스가 없음"
         status: 404
-        detail: "labeling 'lbl_01HZW9P3' not found"
+        detail: "labeling '1' not found"
   AlreadyFinished:
     description: "이미 끝난 작업이라 중단할 수 없음"
     schema:
@@ -712,7 +634,7 @@ responses:
         type: "https://mrx.internal/problems/conflict"
         title: "이미 끝난 작업"
         status: 409
-        detail: "training 'trn_01HZX3K9' is already succeeded"
+        detail: "training '1' is already succeeded"
 
 definitions:
   # ------------------------------------------------------------------ 공통
@@ -730,7 +652,7 @@ definitions:
     properties:
       done:
         type: "integer"
-        description: "처리한 수 (라벨링·데이터셋은 이미지 수, 학습은 epoch 수)"
+        description: "처리한 수 (라벨링은 이미지 수, 학습은 epoch 수)"
         example: 1200
       total:
         type: "integer"
@@ -835,9 +757,9 @@ definitions:
     - "label_path"
     properties:
       model_id:
-        type: "string"
+        type: "integer"
         description: "학습을 시작할 모델. Registry에 `type: init`으로 등록된 모델이어야 한다"
-        example: "mdl_01HZT0P7"
+        example: 1
       image_path:
         type: "string"
         description: "학습 이미지 위치"
@@ -861,13 +783,13 @@ definitions:
       - "status"
       properties:
         init_training_id:
-          type: "string"
+          type: "integer"
           readOnly: true
-          example: "itr_01HZV8K2"
+          example: 1
         model_id:
-          type: "string"
+          type: "integer"
           description: "시작점으로 쓴 `type: init` 모델"
-          example: "mdl_01HZT0P7"
+          example: 1
         image_path:
           type: "string"
           example: "/data/init/LINE3/images"
@@ -892,7 +814,7 @@ definitions:
         weights_path:
           type: "string"
           description: "학습된 가중치 위치. `succeeded`일 때만 있음"
-          example: "/data/init_trainings/itr_01HZV8K2/weights/best.pt"
+          example: "/data/init_trainings/1/weights/best.pt"
         error:
           type: "string"
           description: "실패 원인. `failed`일 때만 있음"
@@ -926,9 +848,9 @@ definitions:
     - "source_path"
     properties:
       model_id:
-        type: "string"
-        description: "라벨링에 쓸 모델"
-        example: "mdl_01HZY2C4"
+        type: "integer"
+        description: "라벨링에 쓸 모델. Registry에 `type: line`으로 등록된 모델이어야 한다"
+        example: 2
       source_path:
         type: "string"
         description: "라벨링할 원천 데이터 위치"
@@ -983,13 +905,13 @@ definitions:
       - "status"
       properties:
         labeling_id:
-          type: "string"
+          type: "integer"
           readOnly: true
-          example: "lbl_01HZW9P3"
+          example: 1
         model_id:
-          type: "string"
+          type: "integer"
           description: "라벨링에 쓴 모델"
-          example: "mdl_01HZY2C4"
+          example: 2
         source_path:
           type: "string"
           example: "/data/raw/2026-10"
@@ -1011,8 +933,8 @@ definitions:
     - "image_path"
     properties:
       image_id:
-        type: "string"
-        example: "img_000123"
+        type: "integer"
+        example: 123
       image_path:
         type: "string"
         example: "/data/raw/2026-10/LINE3_CAM2_104512.png"
@@ -1071,8 +993,8 @@ definitions:
     - "labels"
     properties:
       image_id:
-        type: "string"
-        example: "img_000123"
+        type: "integer"
+        example: 123
       image_path:
         type: "string"
         example: "/data/raw/2026-10/LINE3_CAM2_104512.png"
@@ -1092,9 +1014,9 @@ definitions:
   ReviewResult:
     type: "string"
     description: |
-      이미지별 리뷰 판정 값.
-      - `OK`: 리뷰 불필요. 자동 라벨을 그대로 쓴다
-      - `MODIFY`: 리뷰 필요. 라벨을 고쳐야 한다
+      사람이 확정한 판정.
+      - `OK`: 자동 라벨이 맞다. 그대로 쓴다
+      - `MODIFY`: 라벨을 고쳤다. `labels`를 쓴다
       - `DISCARD`: 사용 안 함
     enum:
     - "OK"
@@ -1102,45 +1024,89 @@ definitions:
     - "DISCARD"
   ImageReview:
     type: "object"
-    description: "모델 판정과 사람 판정. 사람이 검수했는지는 `result`가 있는지로 판단한다."
+    description: "시스템 판정과 사람 판정. 사람이 검수했는지는 `result`가 있는지로 판단한다."
     required:
     - "suggested"
     properties:
       suggested:
         type: "string"
         enum:
-        - "OK"
-        - "MODIFY"
-        - "DISCARD"
+        - "approved"
+        - "review"
         readOnly: true
-        description: "모델(시스템)이 confidence로 정한 판정. 라벨링이 끝나면 항상 있다. 클라이언트는 바꿀 수 없다"
-        example: "OK"
+        description: |
+          시스템 판정. 라벨링이 끝나면 항상 있다. 클라이언트는 바꿀 수 없다.
+          - `approved`: 사람 리뷰가 필요 없다
+          - `review`: 사람 리뷰가 필요하다
+        example: "review"
       result:
         type: "string"
         enum:
         - "OK"
         - "MODIFY"
         - "DISCARD"
-        description: "사람이 확정한 판정. 검수 전이면 없다. `/reviewed` API로 등록·변경한다"
+        description: "사람이 확정한 판정. 검수 전이면 없다. `/review` API로 등록·변경한다"
         example: "MODIFY"
+      labels:
+        type: "array"
+        readOnly: true
+        description: "사람이 고친 라벨. `result`가 `MODIFY`일 때만 있다. 자동 라벨은 그대로 남는다"
+        items:
+          $ref: "#/definitions/ReviewLabel"
       reviewed_at:
         type: "string"
         format: "date-time"
         readOnly: true
         description: "사람이 판정한 시각. 검수 전이면 없다"
         example: "2026-11-02T18:30:00+09:00"
-  ReviewedImage:
+  ReviewLabel:
+    type: "object"
+    required:
+    - "class_id"
+    - "bbox_xyxy"
+    properties:
+      class_id:
+        type: "integer"
+        minimum: 0
+        example: 0
+      class_name:
+        type: "string"
+        readOnly: true
+        example: "scratch"
+      bbox_xyxy:
+        type: "array"
+        description: "픽셀 좌표 [x1, y1, x2, y2]"
+        minItems: 4
+        maxItems: 4
+        items:
+          type: "number"
+        example: [120.5, 88.0, 240.25, 190.75]
+      bbox_xywhn:
+        type: "array"
+        readOnly: true
+        description: "정규화 좌표 [중심 x, 중심 y, 너비, 높이] (YOLO 형식)"
+        minItems: 4
+        maxItems: 4
+        items:
+          type: "number"
+        example: [0.0882, 0.0912, 0.0586, 0.0668]
+  ReviewItem:
     type: "object"
     required:
     - "image_id"
     - "result"
     properties:
       image_id:
-        type: "string"
-        example: "img_000123"
+        type: "integer"
+        example: 123
       result:
         $ref: "#/definitions/ReviewResult"
-  ReviewedImagesRequest:
+      labels:
+        type: "array"
+        description: "`result`가 `MODIFY`일 때 필수이고, 다른 판정이면 보내면 안 된다. 이미지의 라벨 전체를 대체하며, 빈 배열은 결함이 없다는 뜻이다"
+        items:
+          $ref: "#/definitions/ReviewLabel"
+  ReviewRequest:
     type: "object"
     required:
     - "items"
@@ -1150,21 +1116,24 @@ definitions:
         minItems: 1
         description: "이미지별 사람 판정. 같은 `image_id`가 두 번 이상 있으면 400"
         items:
-          $ref: "#/definitions/ReviewedImage"
+          $ref: "#/definitions/ReviewItem"
     example:
       items:
-      - image_id: "img_000123"
+      - image_id: 123
         result: "OK"
-      - image_id: "img_000124"
+      - image_id: 124
         result: "MODIFY"
-      - image_id: "img_000125"
+        labels:
+        - class_id: 0
+          bbox_xyxy: [120.5, 88.0, 240.25, 190.75]
+      - image_id: 125
         result: "DISCARD"
-  ReviewedImagesResponse:
+  ReviewResponse:
     type: "object"
     properties:
       labeling_id:
-        type: "string"
-        example: "lbl_01HZW9P3"
+        type: "integer"
+        example: 1
       count:
         type: "integer"
         description: "이번 요청으로 등록하거나 바꾼 이미지 수"
@@ -1185,27 +1154,7 @@ definitions:
       updated_at:
         type: "string"
         format: "date-time"
-  # ------------------------------------------------------------------ datasets
-  DatasetMetadata:
-    type: "object"
-    description: "데이터셋을 찾고 구분하는 정보. 목록 조회에서 이 값으로 거를 수 있다."
-    required:
-    - "model_id"
-    - "line"
-    - "task"
-    properties:
-      model_id:
-        type: "string"
-        description: "이 데이터셋으로 학습할 모델"
-        example: "mdl_01HZY2C4"
-      line:
-        type: "string"
-        description: "공정 라인"
-        example: "LINE3"
-      task:
-        type: "string"
-        description: "태스크"
-        example: "detection"
+  # ------------------------------------------------------------------ trainings
   Split:
     type: "object"
     description: "학습 · 검증 · 시험 분할 비율. 합이 1이어야 한다."
@@ -1225,21 +1174,18 @@ definitions:
         minimum: 0
         maximum: 1
         default: 0.1
-  DatasetCreate:
+  TrainingCreate:
     type: "object"
     required:
     - "labeling_ids"
-    - "metadata"
     properties:
       labeling_ids:
         type: "array"
         minItems: 1
-        description: "데이터셋을 만들 라벨링 결과 (succeeded 상태여야 함)"
+        description: "학습 데이터로 쓸 라벨링 (succeeded 상태여야 함)"
         items:
-          type: "string"
-        example: ["lbl_01HZW9P3"]
-      metadata:
-        $ref: "#/definitions/DatasetMetadata"
+          type: "integer"
+        example: [1]
       label_source:
         type: "string"
         enum:
@@ -1248,7 +1194,7 @@ definitions:
         default: "reviewed"
         description: |
           어떤 라벨을 쓸지.
-          - `reviewed`: 사람 판정(`review.result`)이 `OK`인 이미지만 자동 라벨 그대로 사용. `MODIFY`, `DISCARD`, 검수 전 이미지는 제외
+          - `reviewed`: `OK`와 사람 판정 없는 `approved` 이미지는 자동 라벨, `MODIFY`는 고친 라벨을 사용. `DISCARD`와 검수 전 `review` 이미지는 제외
           - `auto`: 자동 라벨 중 `min_confidence` 이상만 사용
       min_confidence:
         type: "number"
@@ -1258,85 +1204,10 @@ definitions:
         example: 0.9
       split:
         $ref: "#/definitions/Split"
-      base_dataset_id:
-        type: "string"
-        description: "이 데이터셋에 더해서 만들 때만 지정. 시험(test) 분할은 기준 데이터셋 것을 그대로 쓴다"
-        example: "ds_01HZX1A2"
-  Dataset:
-    type: "object"
-    allOf:
-    - $ref: "#/definitions/JobTimes"
-    - type: "object"
-      required:
-      - "dataset_id"
-      - "metadata"
-      - "status"
-      properties:
-        dataset_id:
-          type: "string"
-          readOnly: true
-          example: "ds_01HZX1A2"
-        metadata:
-          $ref: "#/definitions/DatasetMetadata"
-        labeling_ids:
-          type: "array"
-          description: "출처 라벨링"
-          items:
-            type: "string"
-        label_source:
-          type: "string"
-          enum:
-          - "reviewed"
-          - "auto"
-        min_confidence:
-          type: "number"
-        base_dataset_id:
-          type: "string"
-        split:
-          $ref: "#/definitions/Split"
-        status:
-          $ref: "#/definitions/JobStatus"
-        num_images:
-          type: "object"
-          description: "분할별 이미지 수"
-          properties:
-            train:
-              type: "integer"
-              example: 3500
-            val:
-              type: "integer"
-              example: 1000
-            test:
-              type: "integer"
-              example: 500
-        class_counts:
-          type: "object"
-          additionalProperties:
-            type: "integer"
-          example:
-            scratch: 8120
-            dent: 3302
-        storage_path:
-          type: "string"
-          description: "구성된 데이터셋 위치"
-          example: "/data/datasets/ds_01HZX1A2"
-        error:
-          type: "string"
-
-  # ------------------------------------------------------------------ trainings
-  TrainingCreate:
-    type: "object"
-    required:
-    - "dataset_id"
-    properties:
-      dataset_id:
-        type: "string"
-        description: "학습에 사용할 데이터셋"
-        example: "ds_01HZX1A2"
       base_model_id:
-        type: "string"
+        type: "integer"
         description: "이어서 학습할 모델. 없으면 처음부터 학습"
-        example: "mdl_01HZY2C4"
+        example: 2
       params:
         $ref: "#/definitions/TrainParams"
   Training:
@@ -1346,18 +1217,29 @@ definitions:
     - type: "object"
       required:
       - "training_id"
-      - "dataset_id"
+      - "labeling_ids"
       - "status"
       properties:
         training_id:
-          type: "string"
+          type: "integer"
           readOnly: true
-          example: "trn_01HZX3K9"
-        dataset_id:
+          example: 1
+        labeling_ids:
+          type: "array"
+          items:
+            type: "integer"
+          example: [1]
+        label_source:
           type: "string"
-          example: "ds_01HZX1A2"
+          enum:
+          - "reviewed"
+          - "auto"
+        min_confidence:
+          type: "number"
+        split:
+          $ref: "#/definitions/Split"
         base_model_id:
-          type: "string"
+          type: "integer"
         params:
           $ref: "#/definitions/TrainParams"
         status:
@@ -1385,8 +1267,8 @@ definitions:
     type: "object"
     properties:
       training_id:
-        type: "string"
-        example: "trn_01HZX3K9"
+        type: "integer"
+        example: 1
       metrics:
         type: "object"
         description: "최종 평가 지표"
@@ -1399,7 +1281,7 @@ definitions:
           recall: 0.688
       weights_path:
         type: "string"
-        example: "/data/trainings/trn_01HZX3K9/weights/best.pt"
+        example: "/data/trainings/1/weights/best.pt"
 
   # ------------------------------------------------------------------ models
   ModelType:
@@ -1444,13 +1326,13 @@ definitions:
         description: "`type: init`일 때 필수. 등록할 모델 가중치 파일 위치"
         example: "/data/pretrained/yolo11m.pt"
       init_training_id:
-        type: "string"
-        description: "`type: line`이고 초도 학습 결과일 때. 모델로 등록할 초도 학습 (succeeded 상태여야 함)"
-        example: "itr_01HZV8K2"
+        type: "integer"
+        description: "`type: line`이고 초도 학습 결과일 때. 모델로 등록할 초도 학습 (succeeded 상태여야 함). `training_id`와 함께 쓸 수 없고, 초도 학습 하나당 모델 하나만 등록할 수 있음"
+        example: 1
       training_id:
-        type: "string"
-        description: "`type: line`이고 재학습 결과일 때. 모델로 등록할 학습 (succeeded 상태여야 함)"
-        example: "trn_01HZX3K9"
+        type: "integer"
+        description: "`type: line`이고 재학습 결과일 때. 모델로 등록할 학습 (succeeded 상태여야 함). `init_training_id`와 함께 쓸 수 없음"
+        example: 1
   ModelApply:
     type: "object"
     properties:
@@ -1501,24 +1383,20 @@ definitions:
     - "created_at"
     properties:
       model_id:
-        type: "string"
+        type: "integer"
         readOnly: true
-        example: "mdl_01HZY2C4"
+        example: 2
       type:
         $ref: "#/definitions/ModelType"
       metadata:
         $ref: "#/definitions/ModelMetadata"
       training_id:
-        type: "string"
+        type: "integer"
         description: "출처 재학습 (`type: line`, 재학습 결과일 때)"
-        example: "trn_01HZX3K9"
+        example: 1
       init_training_id:
-        type: "string"
+        type: "integer"
         description: "출처 초도 학습 (`type: line`, 첫 공정 모델일 때)"
-      dataset_id:
-        type: "string"
-        description: "출처 데이터셋"
-        example: "ds_01HZX1A2"
       metrics:
         type: "object"
         additionalProperties:
