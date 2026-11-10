@@ -2,9 +2,8 @@ openapi: 3.0.3
 info:
   title: mrx API
   version: 0.1.0-draft
-  description: |
 servers:
-  - url: https://api.mrx.example.com/v1/autolabel
+  - url: https://api.mrx.example.com
     description: Placeholder
 security:
   - bearerAuth: []
@@ -14,13 +13,11 @@ tags:
   - name: Review
 
 paths:
-  /jobs:
+  /v1/autolabel/jobs:
     post:
       tags: [Jobs]
       summary: Job 생성
       operationId: createJob
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -38,22 +35,8 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '409': { $ref: '#/components/responses/Conflict' }
         '429': { $ref: '#/components/responses/TooManyRequests' }
-      callbacks:
-        autolabelEvent:
-          '{$request.body#/callback_url}':
-            post:
-              summary: auto labeling / 학습 이벤트 통지 (선택)
-              requestBody:
-                required: true
-                content:
-                  application/json:
-                    schema:
-                      $ref: '#/components/schemas/CallbackEvent'
-              responses:
-                '2XX':
-                  description: 수신 확인
 
-  /jobs/{job_id}:
+  /v1/autolabel/jobs/{job_id}:
     parameters:
       - $ref: '#/components/parameters/JobId'
     get:
@@ -70,7 +53,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /jobs/{job_id}/complete:
+  /v1/autolabel/jobs/{job_id}/complete:
     parameters:
       - $ref: '#/components/parameters/JobId'
     post:
@@ -92,7 +75,7 @@ paths:
         '404': { $ref: '#/components/responses/NotFound' }
         '409': { $ref: '#/components/responses/Conflict' }
 
-  /jobs/{job_id}/tasks:
+  /v1/autolabel/jobs/{job_id}/tasks:
     parameters:
       - $ref: '#/components/parameters/JobId'
     post:
@@ -100,8 +83,6 @@ paths:
       summary: Task 생성 (이미지 업로드 + 라벨링 요청)
       description: JB Job에서 데이터가 수집될 때마다 호출. 처리는 비동기.
       operationId: createTask
-      parameters:
-        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -169,7 +150,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /jobs/{job_id}/tasks/{task_id}:
+  /v1/autolabel/jobs/{job_id}/tasks/{task_id}:
     parameters:
       - $ref: '#/components/parameters/JobId'
       - $ref: '#/components/parameters/TaskId'
@@ -187,7 +168,7 @@ paths:
         '401': { $ref: '#/components/responses/Unauthorized' }
         '404': { $ref: '#/components/responses/NotFound' }
 
-  /jobs/{job_id}/tasks/{task_id}/review:
+  /v1/autolabel/jobs/{job_id}/tasks/{task_id}/review:
     parameters:
       - $ref: '#/components/parameters/JobId'
       - $ref: '#/components/parameters/TaskId'
@@ -239,13 +220,6 @@ components:
       schema:
         type: string
         example: task_001
-    IdempotencyKey:
-      name: Idempotency-Key
-      in: header
-      required: false
-      description: 중복 요청 방지 키. Task 생성 시 JB 수집 ID 사용 권장.
-      schema:
-        type: string
 
   responses:
     BadRequest:
@@ -288,17 +262,8 @@ components:
           type: string
           description: JB 쪽 Job ID
           example: JB-JOB-123
-        external_step_id:
-          type: string
-          description: JB Job 내 auto labeling 단계 ID (선택)
-          example: autolabel-01
         label_spec:
           $ref: '#/components/schemas/LabelSpec'
-        callback_url:
-          type: string
-          format: uri
-          description: 이벤트 통지 URL (선택)
-          example: https://jb.example/hooks/autolabel
 
     LabelSpec:
       type: object
@@ -327,8 +292,6 @@ components:
         external_job_id:
           type: string
           example: JB-JOB-123
-        external_step_id:
-          type: string
         status:
           $ref: '#/components/schemas/JobStatus'
         label_spec:
@@ -515,28 +478,6 @@ components:
       allOf:
         - $ref: '#/components/schemas/ReviewRequest'
       nullable: true
-
-    CallbackEvent:
-      type: object
-      required: [event, job_id]
-      properties:
-        event:
-          type: string
-          enum:
-            - task.labeled
-            - task.failed
-            - job.training_completed
-            - job.training_failed
-        job_id:
-          type: string
-        external_job_id:
-          type: string
-        task_id:
-          type: string
-          nullable: true
-        occurred_at:
-          type: string
-          format: date-time
 
     ErrorBody:
       type: object
