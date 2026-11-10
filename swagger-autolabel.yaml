@@ -39,7 +39,7 @@ paths:
       - $ref: '#/components/parameters/JobId'
     get:
       tags: [Autolabel]
-      summary: Job 조회 (상태, 진행률)
+      summary: Job 조회
       operationId: getJob
       responses:
         '200':
@@ -57,10 +57,6 @@ paths:
     post:
       tags: [Autolabel]
       summary: Job 종료 및 학습 트리거
-      description: |
-        리뷰 완료된 task(APPROVED, MODIFIED)만 학습에 사용한다.
-        미리뷰 task와 REJECTED는 제외된다.
-        종료 이후 task 생성/리뷰 요청은 409로 거부된다.
       operationId: completeJob
       responses:
         '202':
@@ -78,8 +74,7 @@ paths:
       - $ref: '#/components/parameters/JobId'
     post:
       tags: [Autolabel]
-      summary: Task 생성 (이미지 업로드 + 라벨링 요청)
-      description: JB Job에서 데이터가 수집될 때마다 호출. 처리는 비동기.
+      summary: Task 생성
       operationId: createTask
       requestBody:
         required: true
@@ -154,7 +149,7 @@ paths:
       - $ref: '#/components/parameters/TaskId'
     get:
       tags: [Autolabel]
-      summary: Task 조회 (상태, auto label 결과, 리뷰)
+      summary: Task 조회
       operationId: getTask
       responses:
         '200':
@@ -172,11 +167,7 @@ paths:
       - $ref: '#/components/parameters/TaskId'
     put:
       tags: [Autolabel]
-      summary: 리뷰 결과 전송 (task 단위)
-      description: |
-        LABELED 또는 REVIEWED 상태의 task에만 허용. 재전송 시 덮어쓴다.
-        APPROVED는 labels 생략 가능(auto label을 정답으로 사용),
-        MODIFIED는 labels 필수, REJECTED는 학습에서 제외.
+      summary: 리뷰 결과 전송
       operationId: putReview
       requestBody:
         required: true
