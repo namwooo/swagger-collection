@@ -1,0 +1,555 @@
+openapi: 3.0.3
+info:
+  title: mrx API
+  version: 0.1.0-draft
+  description: |
+servers:
+  - url: https://api.mrx.example.com/v1/autolabel
+    description: Placeholder
+security:
+  - bearerAuth: []
+tags:
+  - name: Jobs
+  - name: Tasks
+  - name: Review
+
+paths:
+  /jobs:
+    post:
+      tags: [Jobs]
+      summary: Job 생성
+      operationId: createJob
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateJobRequest'
+      responses:
+        '201':
+          description: 생성됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+      callbacks:
+        autolabelEvent:
+          '{$request.body#/callback_url}':
+            post:
+              summary: auto labeling / 학습 이벤트 통지 (선택)
+              requestBody:
+                required: true
+                content:
+                  application/json:
+                    schema:
+                      $ref: '#/components/schemas/CallbackEvent'
+              responses:
+                '2XX':
+                  description: 수신 확인
+
+  /jobs/{job_id}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    get:
+      tags: [Jobs]
+      summary: Job 조회 (상태, 진행률)
+      operationId: getJob
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Job'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /jobs/{job_id}/complete:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [Jobs]
+      summary: Job 종료 및 학습 트리거
+      description: |
+        리뷰 완료된 task(APPROVED, MODIFIED)만 학습에 사용한다.
+        미리뷰 task와 REJECTED는 제외된다.
+        종료 이후 task 생성/리뷰 요청은 409로 거부된다.
+      operationId: completeJob
+      responses:
+        '202':
+          description: 학습 시작됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CompleteJobResponse'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+  /jobs/{job_id}/tasks:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+    post:
+      tags: [Tasks]
+      summary: Task 생성 (이미지 업로드 + 라벨링 요청)
+      description: JB Job에서 데이터가 수집될 때마다 호출. 처리는 비동기.
+      operationId: createTask
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [files]
+              properties:
+                files:
+                  type: array
+                  description: 라벨링할 이미지 (task당 최대 개수/크기 미정)
+                  items:
+                    type: string
+                    format: binary
+                metadata:
+                  $ref: '#/components/schemas/TaskMetadata'
+            encoding:
+              metadata:
+                contentType: application/json
+      responses:
+        '202':
+          description: 접수됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskAccepted'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+        '413':
+          description: 업로드 크기 초과
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+        '429': { $ref: '#/components/responses/TooManyRequests' }
+    get:
+      tags: [Tasks]
+      summary: Task 목록
+      operationId: listTasks
+      parameters:
+        - name: status
+          in: query
+          schema:
+            $ref: '#/components/schemas/TaskStatus'
+        - name: cursor
+          in: query
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskList'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /jobs/{job_id}/tasks/{task_id}:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+      - $ref: '#/components/parameters/TaskId'
+    get:
+      tags: [Tasks]
+      summary: Task 조회 (상태, auto label 결과, 리뷰)
+      operationId: getTask
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+
+  /jobs/{job_id}/tasks/{task_id}/review:
+    parameters:
+      - $ref: '#/components/parameters/JobId'
+      - $ref: '#/components/parameters/TaskId'
+    put:
+      tags: [Review]
+      summary: 리뷰 결과 전송 (task 단위)
+      description: |
+        LABELED 또는 REVIEWED 상태의 task에만 허용. 재전송 시 덮어쓴다.
+        APPROVED는 labels 생략 가능(auto label을 정답으로 사용),
+        MODIFIED는 labels 필수, REJECTED는 학습에서 제외.
+      operationId: putReview
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReviewRequest'
+      responses:
+        '200':
+          description: 반영됨
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+        '400': { $ref: '#/components/responses/BadRequest' }
+        '401': { $ref: '#/components/responses/Unauthorized' }
+        '404': { $ref: '#/components/responses/NotFound' }
+        '409': { $ref: '#/components/responses/Conflict' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: JB 전용 API Key (인증 방식 미확정)
+
+  parameters:
+    JobId:
+      name: job_id
+      in: path
+      required: true
+      schema:
+        type: string
+        example: job_abc
+    TaskId:
+      name: task_id
+      in: path
+      required: true
+      schema:
+        type: string
+        example: task_001
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      description: 중복 요청 방지 키. Task 생성 시 JB 수집 ID 사용 권장.
+      schema:
+        type: string
+
+  responses:
+    BadRequest:
+      description: 잘못된 요청
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Unauthorized:
+      description: 인증 실패
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NotFound:
+      description: 리소스 없음
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflict:
+      description: 현재 상태에서 허용되지 않는 요청 (예. 종료된 Job, 리뷰 불가 상태의 task)
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    TooManyRequests:
+      description: Rate limit 초과
+      headers:
+        Retry-After:
+          schema:
+            type: integer
+          description: 재시도까지 대기할 초
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    CreateJobRequest:
+      type: object
+      required: [external_job_id, label_spec]
+      properties:
+        external_job_id:
+          type: string
+          description: JB 쪽 Job ID
+          example: JB-JOB-123
+        external_step_id:
+          type: string
+          description: JB Job 내 auto labeling 단계 ID (선택)
+          example: autolabel-01
+        label_spec:
+          $ref: '#/components/schemas/LabelSpec'
+        callback_url:
+          type: string
+          format: uri
+          description: 이벤트 통지 URL (선택)
+          example: https://jb.example/hooks/autolabel
+
+    LabelSpec:
+      type: object
+      required: [classes]
+      properties:
+        model:
+          type: string
+          description: 사용할 모델 (생략 시 최신 버전)
+          example: default
+        classes:
+          type: array
+          items:
+            type: string
+          example: [car, person]
+
+    JobStatus:
+      type: string
+      enum: [OPEN, TRAINING, COMPLETED, FAILED]
+
+    Job:
+      type: object
+      properties:
+        job_id:
+          type: string
+          example: job_abc
+        external_job_id:
+          type: string
+          example: JB-JOB-123
+        external_step_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        label_spec:
+          $ref: '#/components/schemas/LabelSpec'
+        model_version:
+          type: string
+          description: 이 Job의 auto labeling에 사용된 모델 버전
+          example: v12
+        progress:
+          $ref: '#/components/schemas/JobProgress'
+        created_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    JobProgress:
+      type: object
+      properties:
+        total: { type: integer, example: 120 }
+        labeled: { type: integer, example: 118 }
+        reviewed: { type: integer, example: 95 }
+        failed: { type: integer, example: 2 }
+
+    CompleteJobResponse:
+      type: object
+      properties:
+        job_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/JobStatus'
+        training_set:
+          type: object
+          properties:
+            reviewed:
+              type: integer
+              description: 학습에 사용되는 task 수 (APPROVED + MODIFIED)
+              example: 95
+            excluded:
+              type: integer
+              description: 제외된 task 수 (미리뷰, REJECTED, FAILED)
+              example: 25
+
+    TaskMetadata:
+      type: object
+      properties:
+        external_collection_id:
+          type: string
+          description: JB 수집 단위 ID
+          example: COL-20261111-0001
+        collected_at:
+          type: string
+          format: date-time
+        extra:
+          type: object
+          additionalProperties: true
+
+    TaskStatus:
+      type: string
+      enum: [PENDING, RUNNING, LABELED, REVIEWED, FAILED]
+
+    TaskAccepted:
+      type: object
+      properties:
+        task_id:
+          type: string
+          example: task_001
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+
+    Task:
+      type: object
+      properties:
+        task_id:
+          type: string
+        job_id:
+          type: string
+        status:
+          $ref: '#/components/schemas/TaskStatus'
+        metadata:
+          $ref: '#/components/schemas/TaskMetadata'
+        images:
+          type: array
+          items:
+            $ref: '#/components/schemas/ImageRef'
+        result:
+          $ref: '#/components/schemas/AutoLabelResult'
+        review:
+          $ref: '#/components/schemas/Review'
+        error:
+          $ref: '#/components/schemas/ErrorBody'
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    TaskList:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+        next_cursor:
+          type: string
+          nullable: true
+
+    ImageRef:
+      type: object
+      properties:
+        image_id:
+          type: string
+          example: img_001
+        filename:
+          type: string
+          example: frame_0001.jpg
+        width: { type: integer }
+        height: { type: integer }
+
+    AutoLabelResult:
+      type: object
+      nullable: true
+      description: LABELED 이후에 채워짐
+      properties:
+        model_version:
+          type: string
+          example: v12
+        labels:
+          type: array
+          items:
+            $ref: '#/components/schemas/Label'
+
+    Label:
+      type: object
+      description: 라벨 포맷 상세는 미정 (bbox 예시)
+      required: [image_id, class]
+      properties:
+        image_id:
+          type: string
+        class:
+          type: string
+          example: car
+        bbox:
+          type: array
+          description: '[x, y, width, height] (pixel)'
+          minItems: 4
+          maxItems: 4
+          items:
+            type: number
+          example: [120, 80, 64, 48]
+        score:
+          type: number
+          format: float
+          description: auto label 신뢰도 (리뷰 라벨에는 생략)
+          example: 0.92
+
+    ReviewStatus:
+      type: string
+      enum: [APPROVED, MODIFIED, REJECTED]
+
+    ReviewRequest:
+      type: object
+      required: [review_status]
+      properties:
+        review_status:
+          $ref: '#/components/schemas/ReviewStatus'
+        labels:
+          type: array
+          description: MODIFIED일 때 필수
+          items:
+            $ref: '#/components/schemas/Label'
+        reviewer:
+          type: string
+          example: jb-user-01
+        reviewed_at:
+          type: string
+          format: date-time
+
+    Review:
+      allOf:
+        - $ref: '#/components/schemas/ReviewRequest'
+      nullable: true
+
+    CallbackEvent:
+      type: object
+      required: [event, job_id]
+      properties:
+        event:
+          type: string
+          enum:
+            - task.labeled
+            - task.failed
+            - job.training_completed
+            - job.training_failed
+        job_id:
+          type: string
+        external_job_id:
+          type: string
+        task_id:
+          type: string
+          nullable: true
+        occurred_at:
+          type: string
+          format: date-time
+
+    ErrorBody:
+      type: object
+      nullable: true
+      properties:
+        code:
+          type: string
+          example: JOB_ALREADY_COMPLETED
+        message:
+          type: string
+
+    Error:
+      type: object
+      properties:
+        error:
+          $ref: '#/components/schemas/ErrorBody'
