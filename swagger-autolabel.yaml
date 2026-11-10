@@ -56,7 +56,7 @@ paths:
       - $ref: '#/components/parameters/JobId'
     post:
       tags: [Autolabel]
-      summary: Job 종료 및 학습 트리거
+      summary: Job 종료
       operationId: completeJob
       responses:
         '202':
