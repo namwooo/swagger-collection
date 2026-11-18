@@ -46,21 +46,17 @@ paths:
       description: |
         이미지 파일 업로드. multipart/form-data로 전송합니다.
         ※ 원본 정의서에 job_id 외 항목이 "...."로 미정 상태이므로 추가 필드 확정 필요.
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           multipart/form-data:
             schema:
               type: object
-              required: [msg_id, send_time, job_id, file]
+              required: [job_id, file]
               properties:
-                msg_id:
-                  type: string
-                  description: 메시지 ID
-                send_time:
-                  type: string
-                  format: date-time
-                  description: 송신 시각
                 job_id:
                   type: string
                   description: 작업 ID
@@ -84,18 +80,15 @@ paths:
       tags: ["API - Labeling"]
       operationId: ifL01DatasetBuildRequest
       summary: "[if-l01] 데이터셋 구성 지시"
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/DatasetBuildRequest'
+              $ref: '#/components/schemas/DatasetBuildRequest'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
@@ -112,18 +105,15 @@ paths:
       tags: ["API - Labeling"]
       operationId: ifL04ReviewResult
       summary: "[if-l04] 검수 판정 회신"
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/ReviewResult'
+              $ref: '#/components/schemas/ReviewResult'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
@@ -140,18 +130,15 @@ paths:
       tags: ["API - Training"]
       operationId: ifT01TrainingRequest
       summary: "[if-t01] 학습 작업 지시"
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/TrainingRequest'
+              $ref: '#/components/schemas/TrainingRequest'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
@@ -168,18 +155,15 @@ paths:
       tags: ["API - Training"]
       operationId: ifT05TrainingCancel
       summary: "[if-t05] 학습 취소"
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/TrainingCancel'
+              $ref: '#/components/schemas/TrainingCancel'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
@@ -200,18 +184,15 @@ paths:
       operationId: ifS01ImageSaveCallback
       summary: "[if-s01] 이미지 저장 callback"
       description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/ImageSaveCallback'
+              $ref: '#/components/schemas/ImageSaveCallback'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
@@ -229,18 +210,15 @@ paths:
       operationId: ifL02LabelResultCallback
       summary: "[if-l02] 라벨링 결과 수신 callback"
       description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/LabelResultCallback'
+              $ref: '#/components/schemas/LabelResultCallback'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
@@ -258,18 +236,15 @@ paths:
       operationId: ifL03DatasetBuildCompleteCallback
       summary: "[if-l03] 데이터셋 구성 완료 통보 callback"
       description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/DatasetBuildCompleteCallback'
+              $ref: '#/components/schemas/DatasetBuildCompleteCallback'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
@@ -287,18 +262,15 @@ paths:
       operationId: ifT02TrainingProgressCallback
       summary: "[if-t02] 학습 진행 상태 callback"
       description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/TrainingProgressCallback'
+              $ref: '#/components/schemas/TrainingProgressCallback'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
@@ -316,18 +288,15 @@ paths:
       operationId: ifT03TrainingEvaluationCallback
       summary: "[if-t03] 학습 평가 결과 callback"
       description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
+      parameters:
+        - $ref: '#/components/parameters/MsgId'
+        - $ref: '#/components/parameters/SendTime'
       requestBody:
         required: true
         content:
           application/json:
             schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/TrainingEvaluationCallback'
+              $ref: '#/components/schemas/TrainingEvaluationCallback'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
@@ -337,6 +306,25 @@ paths:
           $ref: '#/components/responses/ServerError'
 
 components:
+  parameters:
+    MsgId:
+      name: msg_id
+      in: header
+      required: true
+      description: 메시지 고유 ID
+      schema:
+        type: string
+        example: MSG-20261118-0001
+    SendTime:
+      name: send_time
+      in: header
+      required: true
+      description: 송신 시각 (ISO 8601)
+      schema:
+        type: string
+        format: date-time
+        example: "2026-11-18T09:00:00+09:00"
+
   responses:
     Ack:
       description: 정상 수신
@@ -351,7 +339,6 @@ components:
           schema:
             $ref: '#/components/schemas/AckResponse'
           example:
-            header: { msg_id: "MSG-20261118-0001", send_time: "2026-11-18T09:00:00+09:00" }
             result_cd: "E400"
             result_msg: "필수 항목 누락: dataset_id"
     ServerError:
@@ -363,28 +350,11 @@ components:
 
   schemas:
     # ───────── 공통 ─────────
-    Header:
-      type: object
-      description: 공통 메시지 헤더
-      required: [msg_id, send_time]
-      properties:
-        msg_id:
-          type: string
-          description: 메시지 고유 ID
-          example: MSG-20261118-0001
-        send_time:
-          type: string
-          format: date-time
-          description: 송신 시각 (ISO 8601)
-          example: "2026-11-18T09:00:00+09:00"
-
     AckResponse:
       type: object
       description: 공통 수신 응답
-      required: [header, result_cd]
+      required: [result_cd]
       properties:
-        header:
-          $ref: '#/components/schemas/Header'
         result_cd:
           type: string
           description: 처리 결과 코드 (0000 = 정상)
