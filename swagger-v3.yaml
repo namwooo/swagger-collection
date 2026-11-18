@@ -2,55 +2,45 @@ openapi: 3.0.3
 info:
   title: MRX Interface API
   version: 1.0.0
-  description: |
-    MRX 시스템 간 인터페이스 정의서 (Storage / Labeling / Training)
-
-    - 모든 요청 메시지는 공통 `header`(msg_id, send_time)와 업무 데이터 `body`로 구성됩니다.
-    - 모든 응답은 공통 수신 응답(`AckResponse`)을 반환합니다.
-    - 인터페이스 ID 규칙: `if-s**`(Storage), `if-l**`(Labeling/Dataset), `if-t**`(Training)
 
 servers:
-  - url: http://localhost:8080/api/v1
-    description: Local
+  - url: http://target-server:8080/api/v1
+    description: 상대 시스템 (요청 API 수신)
+  - url: http://jb-server:8080/api/v1
+    description: JB 서버 (callback 수신)
 
 tags:
-  - name: Storage
-    description: 이미지 저장/업로드 (if-s)
-  - name: Labeling
-    description: 데이터셋 구성 및 라벨링 (if-l)
-  - name: Training
-    description: 모델 학습 (if-t)
+  # ── [1] 요청 API (JB → 상대 시스템, 상대 시스템 구현) ──
+  - name: API - Storage
+    description: "[요청] 이미지 업로드 (if-s02)"
+  - name: API - Labeling
+    description: "[요청] 데이터셋 구성 지시 / 검수 판정 회신 (if-l01, if-l04)"
+  - name: API - Training
+    description: "[요청] 학습 작업 지시 / 학습 취소 (if-t01, if-t05)"
+  # ── [2] Callback API (상대 시스템 → JB, JB 구현) ──
+  - name: JB Callback - Storage
+    description: "[JB 구현] 이미지 저장 callback (if-s01)"
+  - name: JB Callback - Labeling
+    description: "[JB 구현] 라벨링 결과 / 데이터셋 구성 완료 callback (if-l02, if-l03)"
+  - name: JB Callback - Training
+    description: "[JB 구현] 학습 진행 상태 / 평가 결과 callback (if-t02, if-t03)"
+
+x-tagGroups:
+  - name: "[1] 요청 API (상대 시스템 구현)"
+    tags: [API - Storage, API - Labeling, API - Training]
+  - name: "[2] Callback API (JB 구현)"
+    tags: [JB Callback - Storage, JB Callback - Labeling, JB Callback - Training]
 
 paths:
-  # ───────────────────────── Storage ─────────────────────────
-  /images/save-callback:
+  # ════════════════════════════════════════════════════════════
+  # [1] 요청 API — JB가 호출 (상대 시스템 구현)
+  # ════════════════════════════════════════════════════════════
+  /if/if-s02:
+    servers:
+      - url: http://target-server:8080/api/v1
+        description: 상대 시스템 (요청 API 수신)
     post:
-      tags: [Storage]
-      operationId: ifS01ImageSaveCallback
-      summary: "[if-s01] 이미지 저장 callback"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/ImageSaveCallback'
-      responses:
-        '200':
-          $ref: '#/components/responses/Ack'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/ServerError'
-
-  /images/upload:
-    post:
-      tags: [Storage]
+      tags: ["API - Storage"]
       operationId: ifS02ImageUpload
       summary: "[if-s02] 이미지 업로드"
       description: |
@@ -86,10 +76,12 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
-  # ───────────────────────── Labeling ─────────────────────────
-  /datasets/build:
+  /if/if-l01:
+    servers:
+      - url: http://target-server:8080/api/v1
+        description: 상대 시스템 (요청 API 수신)
     post:
-      tags: [Labeling]
+      tags: ["API - Labeling"]
       operationId: ifL01DatasetBuildRequest
       summary: "[if-l01] 데이터셋 구성 지시"
       requestBody:
@@ -112,59 +104,12 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
-  /labels/result-callback:
+  /if/if-l04:
+    servers:
+      - url: http://target-server:8080/api/v1
+        description: 상대 시스템 (요청 API 수신)
     post:
-      tags: [Labeling]
-      operationId: ifL02LabelResultCallback
-      summary: "[if-l02] 라벨링 결과 수신 callback"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/LabelResultCallback'
-      responses:
-        '200':
-          $ref: '#/components/responses/Ack'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/ServerError'
-
-  /datasets/build-complete-callback:
-    post:
-      tags: [Labeling]
-      operationId: ifL03DatasetBuildCompleteCallback
-      summary: "[if-l03] 데이터셋 구성 완료 통보 callback"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/DatasetBuildCompleteCallback'
-      responses:
-        '200':
-          $ref: '#/components/responses/Ack'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/ServerError'
-
-  /labels/review-result:
-    post:
-      tags: [Labeling]
+      tags: ["API - Labeling"]
       operationId: ifL04ReviewResult
       summary: "[if-l04] 검수 판정 회신"
       requestBody:
@@ -187,10 +132,12 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
-  # ───────────────────────── Training ─────────────────────────
-  /trainings:
+  /if/if-t01:
+    servers:
+      - url: http://target-server:8080/api/v1
+        description: 상대 시스템 (요청 API 수신)
     post:
-      tags: [Training]
+      tags: ["API - Training"]
       operationId: ifT01TrainingRequest
       summary: "[if-t01] 학습 작업 지시"
       requestBody:
@@ -213,11 +160,133 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
-  /trainings/progress-callback:
+  /if/if-t05:
+    servers:
+      - url: http://target-server:8080/api/v1
+        description: 상대 시스템 (요청 API 수신)
     post:
-      tags: [Training]
+      tags: ["API - Training"]
+      operationId: ifT05TrainingCancel
+      summary: "[if-t05] 학습 취소"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [header, body]
+              properties:
+                header:
+                  $ref: '#/components/schemas/Header'
+                body:
+                  $ref: '#/components/schemas/TrainingCancel'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ack'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  # ════════════════════════════════════════════════════════════
+  # [2] Callback API — 상대 시스템이 호출 (JB 구현)
+  # ════════════════════════════════════════════════════════════
+  /if/if-s01:
+    servers:
+      - url: http://jb-server:8080/api/v1
+        description: JB 서버 (callback 수신)
+    post:
+      tags: ["JB Callback - Storage"]
+      operationId: ifS01ImageSaveCallback
+      summary: "[if-s01] 이미지 저장 callback"
+      description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [header, body]
+              properties:
+                header:
+                  $ref: '#/components/schemas/Header'
+                body:
+                  $ref: '#/components/schemas/ImageSaveCallback'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ack'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /if/if-l02:
+    servers:
+      - url: http://jb-server:8080/api/v1
+        description: JB 서버 (callback 수신)
+    post:
+      tags: ["JB Callback - Labeling"]
+      operationId: ifL02LabelResultCallback
+      summary: "[if-l02] 라벨링 결과 수신 callback"
+      description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [header, body]
+              properties:
+                header:
+                  $ref: '#/components/schemas/Header'
+                body:
+                  $ref: '#/components/schemas/LabelResultCallback'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ack'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /if/if-l03:
+    servers:
+      - url: http://jb-server:8080/api/v1
+        description: JB 서버 (callback 수신)
+    post:
+      tags: ["JB Callback - Labeling"]
+      operationId: ifL03DatasetBuildCompleteCallback
+      summary: "[if-l03] 데이터셋 구성 완료 통보 callback"
+      description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [header, body]
+              properties:
+                header:
+                  $ref: '#/components/schemas/Header'
+                body:
+                  $ref: '#/components/schemas/DatasetBuildCompleteCallback'
+      responses:
+        '200':
+          $ref: '#/components/responses/Ack'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '500':
+          $ref: '#/components/responses/ServerError'
+
+  /if/if-t02:
+    servers:
+      - url: http://jb-server:8080/api/v1
+        description: JB 서버 (callback 수신)
+    post:
+      tags: ["JB Callback - Training"]
       operationId: ifT02TrainingProgressCallback
       summary: "[if-t02] 학습 진행 상태 callback"
+      description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
       requestBody:
         required: true
         content:
@@ -238,11 +307,15 @@ paths:
         '500':
           $ref: '#/components/responses/ServerError'
 
-  /trainings/evaluation-callback:
+  /if/if-t03:
+    servers:
+      - url: http://jb-server:8080/api/v1
+        description: JB 서버 (callback 수신)
     post:
-      tags: [Training]
+      tags: ["JB Callback - Training"]
       operationId: ifT03TrainingEvaluationCallback
       summary: "[if-t03] 학습 평가 결과 callback"
+      description: "**[JB 구현]** 상대 시스템이 처리 결과를 JB로 통보하는 callback입니다."
       requestBody:
         required: true
         content:
@@ -255,31 +328,6 @@ paths:
                   $ref: '#/components/schemas/Header'
                 body:
                   $ref: '#/components/schemas/TrainingEvaluationCallback'
-      responses:
-        '200':
-          $ref: '#/components/responses/Ack'
-        '400':
-          $ref: '#/components/responses/BadRequest'
-        '500':
-          $ref: '#/components/responses/ServerError'
-
-  /trainings/cancel:
-    post:
-      tags: [Training]
-      operationId: ifT05TrainingCancel
-      summary: "[if-t05] 학습 취소"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              type: object
-              required: [header, body]
-              properties:
-                header:
-                  $ref: '#/components/schemas/Header'
-                body:
-                  $ref: '#/components/schemas/TrainingCancel'
       responses:
         '200':
           $ref: '#/components/responses/Ack'
