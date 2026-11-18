@@ -5,11 +5,11 @@ info:
 
 tags:
   # ── [1] 요청 API (JB → 상대 시스템, 상대 시스템 구현) ──
-  - name: API - Storage
+  - name: Storage
     description: "[요청] 이미지 업로드"
-  - name: API - Labeling
+  - name: Labeling
     description: "[요청] 데이터셋 구성 지시 / 검수 판정 회신"
-  - name: API - Training
+  - name: Training
     description: "[요청] 학습 작업 지시 / 학습 취소"
   # ── [2] Callback API (상대 시스템 → JB, JB 구현) ──
   - name: JB Callback - Storage
@@ -21,7 +21,7 @@ tags:
 
 x-tagGroups:
   - name: "[1] 요청 API (상대 시스템 구현)"
-    tags: [API - Storage, API - Labeling, API - Training]
+    tags: [Storage, Labeling, Training]
   - name: "[2] Callback API (JB 구현)"
     tags: [JB Callback - Storage, JB Callback - Labeling, JB Callback - Training]
 
@@ -31,12 +31,10 @@ paths:
   # ════════════════════════════════════════════════════════════
   /if/if-s02:
     post:
-      tags: ["API - Storage"]
+      tags: ["Storage"]
       operationId: ifS02ImageUpload
       summary: "[if-s02] 이미지 업로드"
-      description: |
-        이미지 파일 업로드. multipart/form-data로 전송합니다.
-        ※ 원본 정의서에 job_id 외 항목이 "...."로 미정 상태이므로 추가 필드 확정 필요.
+      description: 이미지 업로드 multipart/form-data로 전송
       parameters:
         - $ref: '#/components/parameters/MsgId'
         - $ref: '#/components/parameters/SendTime'
@@ -46,11 +44,20 @@ paths:
           multipart/form-data:
             schema:
               type: object
-              required: [job_id, file]
+              required: [group_id, ppid, position_id, file]
               properties:
+                group_id:
+                  type: string
+                  description: 그룹 ID
+                ppid:
+                  type: string
+                  description: PPID
+                position_id:
+                  type: string
+                  description: 위치 ID
                 job_id:
                   type: string
-                  description: 작업 ID
+                  description: 작업 ID (선택)
                 file:
                   type: string
                   format: binary
@@ -65,7 +72,7 @@ paths:
 
   /if/if-l01:
     post:
-      tags: ["API - Labeling"]
+      tags: ["Labeling"]
       operationId: ifL01DatasetBuildRequest
       summary: "[if-l01] 데이터셋 구성 지시"
       parameters:
@@ -87,7 +94,7 @@ paths:
 
   /if/if-l04:
     post:
-      tags: ["API - Labeling"]
+      tags: ["Labeling"]
       operationId: ifL04ReviewResult
       summary: "[if-l04] 검수 판정 회신"
       parameters:
@@ -109,7 +116,7 @@ paths:
 
   /if/if-t01:
     post:
-      tags: ["API - Training"]
+      tags: ["Training"]
       operationId: ifT01TrainingRequest
       summary: "[if-t01] 학습 작업 지시"
       parameters:
@@ -131,7 +138,7 @@ paths:
 
   /if/if-t05:
     post:
-      tags: ["API - Training"]
+      tags: ["Training"]
       operationId: ifT05TrainingCancel
       summary: "[if-t05] 학습 취소"
       parameters:
