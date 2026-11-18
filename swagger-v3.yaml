@@ -1,13 +1,7 @@
 openapi: 3.0.3
 info:
-  title: MRX Interface API
+  title: MRX API
   version: 1.0.0
-
-servers:
-  - url: http://target-server:8080/api/v1
-    description: 상대 시스템 (요청 API 수신)
-  - url: http://jb-server:8080/api/v1
-    description: JB 서버 (callback 수신)
 
 tags:
   # ── [1] 요청 API (JB → 상대 시스템, 상대 시스템 구현) ──
@@ -36,9 +30,6 @@ paths:
   # [1] 요청 API — JB가 호출 (상대 시스템 구현)
   # ════════════════════════════════════════════════════════════
   /if/if-s02:
-    servers:
-      - url: http://target-server:8080/api/v1
-        description: 상대 시스템 (요청 API 수신)
     post:
       tags: ["API - Storage"]
       operationId: ifS02ImageUpload
@@ -73,9 +64,6 @@ paths:
           $ref: '#/components/responses/ServerError'
 
   /if/if-l01:
-    servers:
-      - url: http://target-server:8080/api/v1
-        description: 상대 시스템 (요청 API 수신)
     post:
       tags: ["API - Labeling"]
       operationId: ifL01DatasetBuildRequest
@@ -98,9 +86,6 @@ paths:
           $ref: '#/components/responses/ServerError'
 
   /if/if-l04:
-    servers:
-      - url: http://target-server:8080/api/v1
-        description: 상대 시스템 (요청 API 수신)
     post:
       tags: ["API - Labeling"]
       operationId: ifL04ReviewResult
@@ -123,9 +108,6 @@ paths:
           $ref: '#/components/responses/ServerError'
 
   /if/if-t01:
-    servers:
-      - url: http://target-server:8080/api/v1
-        description: 상대 시스템 (요청 API 수신)
     post:
       tags: ["API - Training"]
       operationId: ifT01TrainingRequest
@@ -148,9 +130,6 @@ paths:
           $ref: '#/components/responses/ServerError'
 
   /if/if-t05:
-    servers:
-      - url: http://target-server:8080/api/v1
-        description: 상대 시스템 (요청 API 수신)
     post:
       tags: ["API - Training"]
       operationId: ifT05TrainingCancel
@@ -176,9 +155,6 @@ paths:
   # [2] Callback API — 상대 시스템이 호출 (JB 구현)
   # ════════════════════════════════════════════════════════════
   /if/if-s01:
-    servers:
-      - url: http://jb-server:8080/api/v1
-        description: JB 서버 (callback 수신)
     post:
       tags: ["JB Callback - Storage"]
       operationId: ifS01ImageSaveCallback
@@ -202,9 +178,6 @@ paths:
           $ref: '#/components/responses/ServerError'
 
   /if/if-l02:
-    servers:
-      - url: http://jb-server:8080/api/v1
-        description: JB 서버 (callback 수신)
     post:
       tags: ["JB Callback - Labeling"]
       operationId: ifL02LabelResultCallback
@@ -228,9 +201,6 @@ paths:
           $ref: '#/components/responses/ServerError'
 
   /if/if-l03:
-    servers:
-      - url: http://jb-server:8080/api/v1
-        description: JB 서버 (callback 수신)
     post:
       tags: ["JB Callback - Labeling"]
       operationId: ifL03DatasetBuildCompleteCallback
@@ -254,9 +224,6 @@ paths:
           $ref: '#/components/responses/ServerError'
 
   /if/if-t02:
-    servers:
-      - url: http://jb-server:8080/api/v1
-        description: JB 서버 (callback 수신)
     post:
       tags: ["JB Callback - Training"]
       operationId: ifT02TrainingProgressCallback
@@ -280,9 +247,6 @@ paths:
           $ref: '#/components/responses/ServerError'
 
   /if/if-t03:
-    servers:
-      - url: http://jb-server:8080/api/v1
-        description: JB 서버 (callback 수신)
     post:
       tags: ["JB Callback - Training"]
       operationId: ifT03TrainingEvaluationCallback
