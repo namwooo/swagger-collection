@@ -12,18 +12,18 @@ servers:
 tags:
   # ── [1] 요청 API (JB → 상대 시스템, 상대 시스템 구현) ──
   - name: API - Storage
-    description: "[요청] 이미지 업로드 (if-s02)"
+    description: "[요청] 이미지 업로드"
   - name: API - Labeling
-    description: "[요청] 데이터셋 구성 지시 / 검수 판정 회신 (if-l01, if-l04)"
+    description: "[요청] 데이터셋 구성 지시 / 검수 판정 회신"
   - name: API - Training
-    description: "[요청] 학습 작업 지시 / 학습 취소 (if-t01, if-t05)"
+    description: "[요청] 학습 작업 지시 / 학습 취소"
   # ── [2] Callback API (상대 시스템 → JB, JB 구현) ──
   - name: JB Callback - Storage
-    description: "[JB 구현] 이미지 저장 callback (if-s01)"
+    description: "[JB 구현] 이미지 저장 callback"
   - name: JB Callback - Labeling
-    description: "[JB 구현] 라벨링 결과 / 데이터셋 구성 완료 callback (if-l02, if-l03)"
+    description: "[JB 구현] 라벨링 결과 / 데이터셋 구성 완료 callback"
   - name: JB Callback - Training
-    description: "[JB 구현] 학습 진행 상태 / 평가 결과 callback (if-t02, if-t03)"
+    description: "[JB 구현] 학습 진행 상태 / 평가 결과 callback"
 
 x-tagGroups:
   - name: "[1] 요청 API (상대 시스템 구현)"
